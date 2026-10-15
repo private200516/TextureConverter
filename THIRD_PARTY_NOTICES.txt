@@ -1,0 +1,36 @@
+Texture Converter ALPHA 1.0 / private0516
+Incremental metal reconstruction build, 2026-10-06 workflow
+
+Project code: GPL-3.0. See LICENSE. Source is included as readable Python/C#.
+Development disclosure: GPT-6 Astra was used for code and interface development.
+No endorsement by OpenAI, Bethesda, Microsoft, Qt, or dependency authors is implied.
+
+Bundled dependencies retain their separate terms:
+- Python 3.12.14: runtime/LICENSE.txt. Copied from the local Codex runtime.
+- Qt for Python / PySide6 Essentials and Shiboken6 6.9.2:
+  metadata declares LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.
+  https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.9.2
+  https://download.qt.io/archive/qt/6.9/6.9.2/submodules/
+  https://www.qt.io/licensing/open-source-lgpl-obligations
+  Qt Core/Gui/Widgets/OpenGL/OpenGLWidgets/Svg/Test bindings and required
+  native plugins are deployed from the existing official wheel. QML, SDK
+  tools and unused Qt modules are omitted. No third-party renderer is added.
+  Qt DLLs and Python bindings remain loose and replaceable in vendor/.
+  Unmodified upstream wheel metadata/notices are retained in vendor/*dist-info/.
+- NumPy 2.3.5: vendor/numpy-2.3.5.dist-info/licenses; includes bundled library notices.
+- Pillow 12.3.0: vendor/pillow-12.3.0.dist-info/licenses.
+- Microsoft DirectXTex texconv: MIT; https://github.com/microsoft/DirectXTex
+  The restored tools/texconv.exe had a valid Authenticode signature at build audit.
+  Exact executable SHA256 is recorded in BUILD_INFO.json. No runtime download.
+
+Fonts/icons are restored from the user's original converter assets. This local
+engineering build preserves the existing UI font choices (including Stop).
+A complete independent redistribution-license audit for those pre-existing fonts
+has not been completed. GPL project licensing does not relicense fonts/icons.
+Do not treat this engineering package as a new rights-clearance certificate.
+No user game textures, materials, NIFs, test outputs, or Bethesda archives are
+included in the distributable. Local real-asset validation reports are separate.
+
+All runtime components are unpacked files. There is no UPX, PyInstaller onefile,
+self-extracting application payload, remote update, telemetry, or cloud inference.
+New launcher is unsigned; this build does not guarantee antivirus acceptance.

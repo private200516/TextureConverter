@@ -1,0 +1,4 @@
+PySide6-Essentials==6.9.2
+shiboken6==6.9.2
+Pillow==12.3.0
+numpy==2.3.5

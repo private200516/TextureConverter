@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "relative": ".gitignore",
+      "size": 326,
+      "sha256": "16e45d285d178e800eabaf8cc98a5ed27f4b5d1584a4a346b63253b5c22a24c9"
+    },
+    {
+      "relative": "LICENSE",
+      "size": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "relative": "README.md",
+      "size": 7636,
+      "sha256": "7a4565f1ceb9cb4d6337fcf0500cb647331986f2a69c3e062c93640f001a6bad"
+    },
+    {
+      "relative": "THIRD_PARTY_NOTICES.txt",
+      "size": 2368,
+      "sha256": "4fd3777999830ef6eebd15447cee86ec67112495bbb6f4655e196adc76797ef6"
+    },
+    {
+      "relative": "TextureLauncher.cs",
+      "size": 3212,
+      "sha256": "125e1c1e1e746b02763aa2e871a641290c3485ea9ab35a1923752ae395df3a9e"
+    },
+    {
+      "relative": "UPSTREAM_DEPENDENCIES.md",
+      "size": 3991,
+      "sha256": "983ea818027173ce91c99403008e3ab54e097ff5dd8b00140bf2a4c0a9f1f6da"
+    },
+    {
+      "relative": "app_motion.py",
+      "size": 9463,
+      "sha256": "396bbf02ac7d3b2ef4aeb1cb3eca90200d0fa4d9ee9c2768aa8d17dab16f007f"
+    },
+    {
+      "relative": "assets/fonts/Aquire-Bold.otf",
+      "size": 11180,
+      "sha256": "65193706e222ce28b7f74393fd58ccf98df5829dfb2965056f4e8718c2f48973"
+    },
+    {
+      "relative": "assets/fonts/Aquire-Light.otf",
+      "size": 11180,
+      "sha256": "acaa4068bb657b8c465fd141f959d31b7d2aa900315c5e1df9fcc65569746875"
+    },
+    {
+      "relative": "assets/fonts/Aquire.otf",
+      "size": 11084,
+      "sha256": "666b4c93e02896109f353ef636c896e5542ddc99697e909f2c10cabb4736f9a4"
+    },
+    {
+      "relative": "assets/fonts/ArchivoBlack-Regular.ttf",
+      "size": 90988,
+      "sha256": "dd9a89a019b4849f66ab75455fe7bdf931311042cbb0f0f97acc061539703180"
+    },
+    {
+      "relative": "assets/fonts/HarmonyOS_Sans_SC_Bold.ttf",
+      "size": 8158996,
+      "sha256": "43a424b85e47fb53a17b3b32026a71801f86f8e022ca6798d186b47d39fa5f01"
+    },
+    {
+      "relative": "assets/fonts/HarmonyOS_Sans_SC_Medium.ttf",
+      "size": 8227312,
+      "sha256": "6ed1553edccddc48eb27ff25d134a4a715cf54211238d4840b3038576cba1944"
+    },
+    {
+      "relative": "assets/fonts/HarmonyOS_Sans_SC_Regular.ttf",
+      "size": 8261128,
+      "sha256": "297b088424be212207df2ce8b98e335468b782aa6b96832af0b8b773d711e2b1"
+    },
+    {
+      "relative": "assets/fonts/Inter-Bold.ttf",
+      "size": 509688,
+      "sha256": "30ec813b0389e1ca9efd763e1546002b301d07a3a22c95706f6d938866a3a66f"
+    },
+    {
+      "relative": "assets/fonts/Inter-Medium.ttf",
+      "size": 512120,
+      "sha256": "96993e34ce01e1724e4085c35c72152d2370aafc6ef399e05477d66a0e41e6c1"
+    },
+    {
+      "relative": "assets/fonts/Inter-Regular.ttf",
+      "size": 510472,
+      "sha256": "d063d25329da7863d86eb2ea76b5ba1b67e4999f7635387abec10b7b853b9f55"
+    },
+    {
+      "relative": "assets/fonts/Inter-SemiBold.ttf",
+      "size": 511816,
+      "sha256": "bb6c4f94cb90e6ca32fb18732631e5f5f48200a6fe5f6ab929b9cfdc7cddaa43"
+    },
+    {
+      "relative": "assets/fonts/JetBrainsMono-Bold.ttf",
+      "size": 277828,
+      "sha256": "5590990c82e097397517f275f430af4546e1c45cff408bde4255dad142479dcb"
+    },
+    {
+      "relative": "assets/fonts/JetBrainsMono-Regular.ttf",
+      "size": 273900,
+      "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+    },
+    {
+      "relative": "assets/fonts/Stop-Regular.ttf",
+      "size": 27360,
+      "sha256": "09f9961c00a1b81932fd2069d50a5ef7ae1d6e4b2fea2ed548e4058a83e9f4bc"
+    },
+    {
+      "relative": "assets/icon.ico",
+      "size": 22879,
+      "sha256": "eaf2b6f61a36ef1d118317513625c1a480c7c05203aec3bae6de92312ef3682c"
+    },
+    {
+      "relative": "config.json",
+      "size": 613,
+      "sha256": "240f5122dfaa40a4635fce68e01e0489c1b4816e1e69c77bdc72ed778d86bac4"
+    },
+    {
+      "relative": "config.py",
+      "size": 7275,
+      "sha256": "d0a480aeafc0304623068db6a6d53494499af323074cb408ec9ede6e50283b8f"
+    },
+    {
+      "relative": "converter.py",
+      "size": 14812,
+      "sha256": "1696f6abbcd265578ea57a377b41737db883f2fcffe986d0c89be8101e13a145"
+    },
+    {
+      "relative": "dds.py",
+      "size": 31765,
+      "sha256": "26569f66a4bbedd09f858ac29f07125aca366e7c6254793a5c8e8fe61b11701f"
+    },
+    {
+      "relative": "i18n.py",
+      "size": 20557,
+      "sha256": "c9229a193f2195fcebe27011f1d9e48ef50877476110e7f4a7491260bac96192"
+    },
+    {
+      "relative": "launcher.manifest",
+      "size": 384,
+      "sha256": "367204376d2270c46d8e6c3e6eef10b2d08d63e5d84d257cf40e6ea1df647f59"
+    },
+    {
+      "relative": "licenses/DirectXTex-MIT.txt",
+      "size": 1141,
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    },
+    {
+      "relative": "licenses/GPL-3.0.txt",
+      "size": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "relative": "licenses/Qt-LGPL-3.0-only.txt",
+      "size": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    {
+      "relative": "logger.py",
+      "size": 4144,
+      "sha256": "794736607488e5fe259c8784a345f4c5b4720cc5c23e2c9623d52347d7e13cc8"
+    },
+    {
+      "relative": "main.py",
+      "size": 40577,
+      "sha256": "bccf62db0d5c46b1ccf74590f2a2fbaf38716725d3b072436b3b578b5759fbba"
+    },
+    {
+      "relative": "mask_model.py",
+      "size": 3709,
+      "sha256": "df9a1175a9a99e35b001b3ddcff6270dc0b14963deab4aa0575cc09811d64170"
+    },
+    {
+      "relative": "material.py",
+      "size": 7950,
+      "sha256": "d0465b12709c597bb2236807a98f91fc4d222a5efbddaeafaed38d20326bd4c3"
+    },
+    {
+      "relative": "material_codec.py",
+      "size": 16709,
+      "sha256": "435f628e201a14ad926199ba28e171d486e8928f64f707cb5c18ba2dbd2990bb"
+    },
+    {
+      "relative": "material_converter.py",
+      "size": 4350,
+      "sha256": "b1be3817098300438c16710b291ee26c6a33b1726a874fd68dc3f9d2f4aa0179"
+    },
+    {
+      "relative": "material_corpus.py",
+      "size": 3498,
+      "sha256": "e7deee9b302e2e8297e41405fa3e9cb6587d3d95be27b944df1b259d2fae2186"
+    },
+    {
+      "relative": "material_jobs.py",
+      "size": 11597,
+      "sha256": "f55898d1aa72843dd166e93d9dd0b4f8317f1052944b71d3f4ec8d8dc47aaf9c"
+    },
+    {
+      "relative": "metal_reconstruction.py",
+      "size": 21839,
+      "sha256": "90dbd7dab3badcf25c9aa4fa920025f2e3adacb8c303df33911ed46ded6a9c1b"
+    },
+    {
+      "relative": "metal_ui.py",
+      "size": 27846,
+      "sha256": "55e68ea3089b34b2b0788812103c21c3ce0a9cd13019a26717dc26df6b165798"
+    },
+    {
+      "relative": "nif_preview.py",
+      "size": 27519,
+      "sha256": "9844d4c67ca23308905b9c1c7780bbc8f9bc9b1bc520f3c10a22db12d7e8152e"
+    },
+    {
+      "relative": "nif_preview_data.py",
+      "size": 22026,
+      "sha256": "a99e23c933cf06bd158b76f1cd9ae21c272d2bf142173b51afbc757a40a370b1"
+    },
+    {
+      "relative": "options_policy.py",
+      "size": 2012,
+      "sha256": "f2f013444e98b398fd6007e021a076a7727a639c5f9a9ce1dcba2eaaa1d1dba4"
+    },
+    {
+      "relative": "requirements.txt",
+      "size": 72,
+      "sha256": "692cd3454ca88e9cbb38a166bcedfd51c59bd6c13af46aacd90b96a90bdba63a"
+    },
+    {
+      "relative": "scanner.py",
+      "size": 5602,
+      "sha256": "248b0604cc386a66423bee1074724418bd39a2d0f1fb163c34df4a52b7731509"
+    },
+    {
+      "relative": "semantic_dds.py",
+      "size": 12816,
+      "sha256": "66307d3d80e88089ce25385e9730dbf1c520c70153db64308860f43399cd7337"
+    },
+    {
+      "relative": "templates/default.bgem",
+      "size": 148,
+      "sha256": "ac69682b174d0613ac7a58de913b5d735249c6a15abfbee2683fb106ab614252"
+    },
+    {
+      "relative": "templates/default.bgsm",
+      "size": 212,
+      "sha256": "ce3911ce2840170ce1389a2243a6de2b801228e59b6495cb3d2b1b48f58fbeb0"
+    },
+    {
+      "relative": "tests/test_app_motion.py",
+      "size": 9056,
+      "sha256": "dc5d571f239dd73b6a61a93282db3d3027ea096875502da50db751c7087c9c28"
+    },
+    {
+      "relative": "tests/test_batch_performance.py",
+      "size": 5920,
+      "sha256": "3c762d0f526a18222cb4a59d31fd25e869433ad0352101463cf3eb35719ea7d8"
+    },
+    {
+      "relative": "tests/test_cancellation.py",
+      "size": 21408,
+      "sha256": "2e2084d6c7e7d674f054f0b5a465a79ec6ab11d3287d4cecedf6cc1e22b3bac6"
+    },
+    {
+      "relative": "tests/test_dds_legacy_compat.py",
+      "size": 7130,
+      "sha256": "862a4e8595c3ee0aca6aba31e32d0ba6fbd00f803c538801f8da1e2d9c4f0ece"
+    },
+    {
+      "relative": "tests/test_dds_semantics.py",
+      "size": 8713,
+      "sha256": "e145864f2033a6f11e7f805cbc79aba34a799069fd93922ba8fb019aad7aee84"
+    },
+    {
+      "relative": "tests/test_dds_speed.py",
+      "size": 7315,
+      "sha256": "856a5a52abad1f51c9f5a1e59b05bce779f215438d6bc11f0c25d1891500802f"
+    },
+    {
+      "relative": "tests/test_dds_srgb_compat.py",
+      "size": 2252,
+      "sha256": "48fdcc2e4e6463387f92b06cad7c69de898b2caf49aa34d1f929e83270cce985"
+    },
+    {
+      "relative": "tests/test_main_preview.py",
+      "size": 4572,
+      "sha256": "39e6a86e365422a7862c55bf54ed1a4d9e447597bce833fd39b63513deb7b663"
+    },
+    {
+      "relative": "tests/test_mask_model.py",
+      "size": 1835,
+      "sha256": "4c8f89f204ca3caf0652cdb5f214be61bb71dc6bb007699955864a95e987c304"
+    },
+    {
+      "relative": "tests/test_material_json_compat.py",
+      "size": 10058,
+      "sha256": "5989f6d6727843146c1dec9a7075206107be8890ce50265ca34fba1ef7ec1514"
+    },
+    {
+      "relative": "tests/test_material_pipeline.py",
+      "size": 9494,
+      "sha256": "4604199325ebc0a13b08acc0ed26a258005f4c8b7701b3fa20aed6a8a488fb97"
+    },
+    {
+      "relative": "tests/test_material_resource_compat.py",
+      "size": 4006,
+      "sha256": "c2b8baf342c653d63618318dd2386dd6b14178bde2b5fb83bd0cd20d5a6b1c41"
+    },
+    {
+      "relative": "tests/test_metal_reconstruction.py",
+      "size": 14069,
+      "sha256": "826087cfde2671f2bc07c9e1e5bb385cbca2f3d3ac38b527215680e21070630f"
+    },
+    {
+      "relative": "tests/test_metal_ui.py",
+      "size": 3751,
+      "sha256": "7733964c8d53f869ab6b7917517c06af83fdbee4cef6a9cf8d4586f57c531d2d"
+    },
+    {
+      "relative": "tests/test_motion_integration.py",
+      "size": 4152,
+      "sha256": "8ea4fc2ca7c1fe841dc335d62811374f63e430fbbd1e5c6eff32d49a7d5dd569"
+    },
+    {
+      "relative": "tests/test_nif_preview.py",
+      "size": 8379,
+      "sha256": "ab4f31b9287358191698f6a8d3ce4634557e6b08124c6faf279ae0387865357f"
+    },
+    {
+      "relative": "tests/test_nif_preview_ui.py",
+      "size": 5648,
+      "sha256": "c2445b931d96cd1582f90aee47af417c0d05b2957ef8390ecabc2db9b33444c6"
+    },
+    {
+      "relative": "tests/test_preview_dds_compat.py",
+      "size": 3205,
+      "sha256": "0c41806d90ab5e4726043f672257a62f18e90014e7ebafb0d4b81ebd7067b785"
+    },
+    {
+      "relative": "tests/test_security_boundaries.py",
+      "size": 6989,
+      "sha256": "2127ffa54558fce1a2847ad72ba9fdbbd52544aa11822df63802a7d340d5b5db"
+    },
+    {
+      "relative": "tests/test_ui_dispatch.py",
+      "size": 4511,
+      "sha256": "cf87dda9bd0a756a14f742481ba763eeaea9e8f2f9057570e26279b1fe4feea3"
+    },
+    {
+      "relative": "tests/test_workflow_review.py",
+      "size": 9229,
+      "sha256": "ad2f078af55c12205d831a066ffe1e6eb6bce51960d5783857605aee471f300b"
+    },
+    {
+      "relative": "texture_api.py",
+      "size": 39629,
+      "sha256": "29eaf976295bcb3eebc5535c5787bdd30169d6f06c446bff1a9e2f67b98d2dac"
+    },
+    {
+      "relative": "texture_cli.py",
+      "size": 2127,
+      "sha256": "a1e15789c4c8a95ca02f19dd982be99d00729d8d5f5234d5769ab14a7e5d671b"
+    },
+    {
+      "relative": "tools/gen_icon.py",
+      "size": 1079,
+      "sha256": "d0016b4f3541de4956cf295a8c48b09ba8a6742e77e24625460b0f2b47721413"
+    },
+    {
+      "relative": "tools/gen_templates.py",
+      "size": 4568,
+      "sha256": "69a43709d0cbd010aa939938842dabcf321ff3f67778fc67c34d762b7b0ed1c8"
+    },
+    {
+      "relative": "tools/legacy/README.md",
+      "size": 1011,
+      "sha256": "df144c0e792826380ab35254b495656b0787ca6e1ee3bc20dd4b4bd87618103a"
+    },
+    {
+      "relative": "tools/legacy/build_texture_portable.py",
+      "size": 8098,
+      "sha256": "1616bf832b50a02652faa9da93b75ed068a387293b9b640fbab22c2de02d9049"
+    },
+    {
+      "relative": "tools/texconv.exe",
+      "size": 966480,
+      "sha256": "dcfdec10244e02cf5037fba089c55fb7e1326b1c8181742d77d15fa5cb5eef06"
+    },
+    {
+      "relative": "ui_events.py",
+      "size": 1378,
+      "sha256": "4cef12430aeab511c7087dabc6b68873d151bcc51a83dcf17e7d054846166345"
+    },
+    {
+      "relative": "ui_theme.py",
+      "size": 11365,
+      "sha256": "ac70604d9744752577c4804328c64ca98926f05d05566c1febdc8fb71a0f44d3"
+    },
+    {
+      "relative": "ui_widgets.py",
+      "size": 38662,
+      "sha256": "19a6004b29ed8598cec3360ce1e71a5599e67a4026e0600cb982f3c81c3a8a24"
+    }
+  ],
+  "self_excluded": "SOURCE_MANIFEST.json"
+}
