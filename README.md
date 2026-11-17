@@ -1,6 +1,10 @@
 # TextureConverter · ALPHA 1.0
 
-> **当前安全修订 / Current security revision:** `security-hardening-20261117` · ALPHA 1.0。399 项回归通过；见 [安全更新](SECURITY_REVISION_20261117.md)、[安全边界](SECURITY.md) 和 [构建记录](BUILD_PROVENANCE.json)。
+<p><img src="assets/toolkit-logo.png" width="96" alt="76 Converter Toolkit logo"></p>
+
+> **当前版本 / Current revision:** `logo-security-release-20261117` · ALPHA 1.0。新 Logo 与安全加固，399 项回归通过；见 [本轮更新](LOGO_RELEASE_20261117.md)、[安全边界](SECURITY.md) 和 [构建记录](BUILD_PROVENANCE.json)。
+
+> **基础安全修订 / Included security revision:** `security-hardening-20261117` · ALPHA 1.0。399 项回归通过；见 [安全更新](SECURITY_REVISION_20261117.md)、[安全边界](SECURITY.md) 和 [构建记录](BUILD_PROVENANCE.json)。
 
 > **历史动效验证 / Historical motion validation:** 2026-11-17 Pinterest motion. 启动 1400ms、关闭 650ms；323 项回归通过。详见 [MOTION_REVISION_20261117.md](MOTION_REVISION_20261117.md)。
 
@@ -8,7 +12,7 @@
 
 本地 BGSM/BGEM 材质转换与受支持的 DDS 适配工具。项目代码采用 GPL-3.0；作者为 private0516。原项目使用 GPT-6 Astra 辅助开发，代码与界面包含 AI 生成内容。本项目不代表 Bethesda、OpenAI 或依赖项目背书。
 
-这是完整的源代码开发包，包含原包字体、图标、经核对的 `tools/texconv.exe` 及其 MIT 通知；字体与图标的公开发布已获用户明确授权，资源按原始字节保留。不含预编译产品 EXE、Python runtime、安装后的 vendor 依赖或用户游戏样本。随包编码器的身份不等于本次重新运行或验证了原生 DDS 编码。
+这是完整的源代码开发包，包含原包字体、图标、经核对的 `tools/texconv.exe` 及其 MIT 通知；字体的公开发布已获用户明确授权且保留原始字节；图标更新为作者本轮提供的 Toolkit Logo。不含预编译产品 EXE、Python runtime、安装后的 vendor 依赖或用户游戏样本。随包编码器的身份不等于本次重新运行或验证了原生 DDS 编码。
 
 ## Windows 下载
 

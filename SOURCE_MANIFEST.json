@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "security-hardening-20261117",
+  "revision": "logo-security-release-20261117",
   "files": [
     {
       "relative": ".gitignore",
@@ -14,13 +14,18 @@
     },
     {
       "relative": "BUILD_PROVENANCE.json",
-      "size": 95585,
-      "sha256": "60e6f4c932653e628ce73efcb792bd0523a5898e09bafe941137c88c82a9963f"
+      "size": 95885,
+      "sha256": "8dcf01ba837354dceb4f6b160a027c3bc23b3c7187c8de815feb0562d88e31fb"
     },
     {
       "relative": "LICENSE",
       "size": 35149,
       "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "relative": "LOGO_RELEASE_20261117.md",
+      "size": 3797,
+      "sha256": "c1b1aae6f4abd1f6a40f2fac54c7ae06930b7a1eb07e39d2b18c2dc30015f1c5"
     },
     {
       "relative": "MOTION_REVISION_20261117.md",
@@ -34,8 +39,8 @@
     },
     {
       "relative": "README.md",
-      "size": 8589,
-      "sha256": "5fa94658bb4ebb9d7fbdb00a04d9d59a3c27665ce4952c54304545abac768b32"
+      "size": 8972,
+      "sha256": "75d310243212993b33aa025c0a1dec1ca5e423d850ef2ddca61703ca387e0ed4"
     },
     {
       "relative": "RELEASE_NOTES_20261117.md",
@@ -59,13 +64,13 @@
     },
     {
       "relative": "SECURITY_VALIDATION.json",
-      "size": 1109,
-      "sha256": "0375211eed611348e1eae7d70a1193f094b0f0e5ec814fa1f93746e56efb6b3c"
+      "size": 1202,
+      "sha256": "43747fea0ead4492a9dc234bb77cc9326578bacd147bceec4cace9a032e91543"
     },
     {
       "relative": "THIRD_PARTY_NOTICES.txt",
-      "size": 2571,
-      "sha256": "9c9c1cb1dc6488757d976ab8934728eed84b93881914b858fb09a2ec20ef5475"
+      "size": 2816,
+      "sha256": "6e7e515ad89179538586747ae7c409d53280321c9a90e889aadeb7f0fe7cf1eb"
     },
     {
       "relative": "TextureLauncher.cs",
@@ -84,8 +89,8 @@
     },
     {
       "relative": "app_motion.py",
-      "size": 17600,
-      "sha256": "b6bfd226c5ca977e15e9ba0d5e42c204487341b5da81f9e7adcdf50597a64b93"
+      "size": 17931,
+      "sha256": "3c70cb7a4bbe4014a00d884afba593f989b6bff5d34e516ed6df6384516027fe"
     },
     {
       "relative": "assets/fonts/Aquire-Bold.otf",
@@ -159,8 +164,13 @@
     },
     {
       "relative": "assets/icon.ico",
-      "size": 22879,
-      "sha256": "eaf2b6f61a36ef1d118317513625c1a480c7c05203aec3bae6de92312ef3682c"
+      "size": 85552,
+      "sha256": "e9d3de56ec883865d26cb859dd8380715641bf59586b99dbb22b95aa6942a8ee"
+    },
+    {
+      "relative": "assets/toolkit-logo.png",
+      "size": 835385,
+      "sha256": "bb5462c24e73a18ba7fac4e9087daca464ae6f3116429be37c665b481089810d"
     },
     {
       "relative": "config.json",
@@ -489,8 +499,8 @@
     },
     {
       "relative": "ui_widgets.py",
-      "size": 43111,
-      "sha256": "a43e1a8383bbf06ff2018c325354bb7c008e099e28409a14f911b843a6f03dd8"
+      "size": 43070,
+      "sha256": "732ddf43d83a77cc4abd9990fb652d9552dffce86547ef1ab252937ae233432d"
     }
   ]
 }

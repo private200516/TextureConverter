@@ -12,6 +12,12 @@ from PySide6.QtWidgets import QWidget, QApplication
 import ui_theme as T
 
 
+def brand_logo():
+    """Load only the bundled toolkit mark; callers cache it for their lifetime."""
+    from config import resource_path
+    return QPixmap(resource_path('assets', 'toolkit-logo.png'))
+
+
 def reduced_motion_requested() -> bool:
     """Only an explicit process setting disables the default visible motion."""
     value=os.environ.get('CONVERTER_REDUCED_MOTION',os.environ.get('TEXTURE_CONVERTER_REDUCED_MOTION'))
@@ -145,6 +151,7 @@ class _StartupOverlay(QWidget):
         self._brand_font=QFont();self._brand_font.setFamilies(['Stop','Archivo Black','Inter','Microsoft YaHei UI'])
         self._brand_font.setPixelSize(max(24,min(52,int(window.width()/18))))
         self._small_font=QFont();self._small_font.setFamilies(['JetBrains Mono','Inter','HarmonyOS Sans SC','Microsoft YaHei UI']);self._small_font.setPixelSize(11)
+        self._logo=brand_logo()
         self._bands=[]
 
     def capture(self):
@@ -194,9 +201,11 @@ class _StartupOverlay(QWidget):
             p.setFont(self._small_font);p.setPen(QColor(T.MOTION_INK))
             p.drawText(QRectF(36,cy+41,w-72,24),Qt.AlignCenter,'ALPHA 1.0  /  '+self.author);p.restore()
             align=_out(_unit(t,390,640))
-            p.save();p.translate(cx,cy-72-10*(1-align));p.rotate(18*(1-align))
-            p.setPen(Qt.NoPen);p.setBrush(QColor(T.MOTION_CREAM))
-            for i in range(3):p.drawRoundedRect(QRectF(-24+i*18,-14,8,28),3,3)
+            p.save();p.translate(cx,cy-86-10*(1-align));p.rotate(12*(1-align))
+            p.setOpacity(align)
+            if not self._logo.isNull():
+                size=64*(.9+.1*align)
+                p.drawPixmap(QRectF(-size/2,-size/2,size,size),self._logo,QRectF(self._logo.rect()))
             p.restore()
             p.setPen(QPen(QColor(23,26,21,45),1));p.setBrush(Qt.NoBrush)
             p.drawArc(QRectF(cx-164,cy-164,328,328),int((40+t*.035)*16),100*16)
@@ -218,14 +227,14 @@ class _StartupOverlay(QWidget):
         if t>=430:
             self._registration(p,T.MOTION_CREAM,.6)
             q=_out(_unit(t,430,570));vanish=1-_out(_unit(t,570,615))
-            p.setPen(Qt.NoPen);p.setBrush(QColor(T.MOTION_ORANGE));p.save();p.translate(cx,cy);p.rotate(18*(1-q))
-            for i in range(3):
-                width=(8-2*q)*vanish;height=(28-22*q)*vanish
-                p.drawRoundedRect(QRectF((i-1)*18*(1-q)-width/2.,-height/2.,width,height),3,3)
+            p.save();p.translate(cx,cy);p.rotate(12*(1-q));p.setOpacity(_out(_unit(t,430,490))*vanish)
+            if not self._logo.isNull():
+                size=(72-14*q)*vanish
+                p.drawPixmap(QRectF(-size/2,-size/2,size,size),self._logo,QRectF(self._logo.rect()))
             p.restore()
 
     def paintEvent(self,event):
-        p=QPainter(self);p.fillRect(self.rect(),QColor(T.MOTION_INK));p.setRenderHint(QPainter.Antialiasing)
+        p=QPainter(self);p.fillRect(self.rect(),QColor(T.MOTION_INK));p.setRenderHint(QPainter.Antialiasing);p.setRenderHint(QPainter.SmoothPixmapTransform)
         if self.phase=='shutdown':self._shutdown(p)
         else:self._startup(p)
         p.end()

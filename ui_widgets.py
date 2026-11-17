@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QWidget
 
 import ui_theme as T
 from i18n import tr
-from app_motion import reduced_motion_requested
+from app_motion import reduced_motion_requested, brand_logo
 
 
 def _display_font(px: int, weight=QFont.Black) -> QFont:
@@ -158,6 +158,7 @@ class BannerWidget(_MotionWidget):
         self._running = False
         self._author = author
         self._icon_pm = icon_pm
+        self._logo_pm = brand_logo()
         self._icon_spin = 0.0       # >0 时图标旋转一周（热重载反馈）
         self._count_disp = 0.0      # 大数字显示值（滚动插值）
         self._count_target = 0
@@ -172,12 +173,14 @@ class BannerWidget(_MotionWidget):
     def set_icon(self, pm):
         if pm is not None and not pm.isNull():
             self._icon_pm = pm
+            self._logo_pm = pm
             self.update()
 
     def reload_icon_feedback(self, pm):
         """图标来源变化时替换并旋转一周作为反馈。"""
         if pm is not None and not pm.isNull():
             self._icon_pm = pm
+            self._logo_pm = pm
             self._icon_spin = 0.0
             self.update()
 
@@ -240,26 +243,22 @@ class BannerWidget(_MotionWidget):
             p.setFont(_mono_font(13, QFont.Bold))
             p.drawText(QRectF(nx, 31, 140, 44),
                        Qt.AlignVCenter | Qt.AlignLeft, f"/ {self._total}")
-        # Brand is vector text plus three marks; never an upscaled EXE icon.
+        # The provided toolkit mark is cached from the full-resolution PNG.
         title = "TEXTURE CONVERTER"
-        slash_w, slash_gap, slash_h = 7.0, 6.0, 16.0
-        slashes_w = slash_w*3 + slash_gap*2
+        logo_size, logo_gap = 44.0, 14.0
         stat_end = nx + (QFontMetrics(_mono_font(13,QFont.Bold)).horizontalAdvance(f"/ {self._total}") if self._total else 0)
-        available = max(160., w-pad-max(240.,stat_end+28)-slashes_w-18)
+        available = max(160., w-pad-max(240.,stat_end+28)-logo_size-logo_gap)
         title_size = 30
         while title_size > 18 and QFontMetrics(_display_font(title_size)).horizontalAdvance(title)>available:
             title_size -= 1
         title_font = _display_font(title_size)
         tw = QFontMetrics(title_font).horizontalAdvance(title)
-        group_w = tw + slashes_w + 18
+        group_w = tw + logo_size + logo_gap
         gx = w-pad-group_w; ty=cy-16
-        p.setPen(Qt.NoPen);p.setBrush(QColor(T.RED));p.save()
-        p.translate(gx+slashes_w/2,ty);p.rotate(18)
-        for i in range(3):
-            p.drawRoundedRect(QRectF(-slashes_w/2+i*(slash_w+slash_gap),-slash_h/2,slash_w,slash_h),3,3)
-        p.restore()
+        if not self._logo_pm.isNull():
+            p.drawPixmap(QRectF(gx,ty-logo_size/2,logo_size,logo_size),self._logo_pm,QRectF(self._logo_pm.rect()))
         p.setFont(title_font);p.setPen(QColor(T.INK))
-        p.drawText(QRectF(gx+slashes_w+18,ty-24,tw+8,48),Qt.AlignVCenter|Qt.AlignLeft,title)
+        p.drawText(QRectF(gx+logo_size+logo_gap,ty-24,tw+8,48),Qt.AlignVCenter|Qt.AlignLeft,title)
         p.setPen(QColor(T.INK_SOFT));p.setFont(_ui_font(10,QFont.Medium))
         subtitle="FO76 → FO4 / BATCH MATERIAL PROCESSING"
         subtitle=QFontMetrics(p.font()).elidedText(subtitle,Qt.ElideMiddle,int(group_w))

@@ -36,3 +36,5 @@ self-extracting application payload, remote update, telemetry, or cloud inferenc
 New launcher is unsigned; this build does not guarantee antivirus acceptance.
 
 Security revision 2026-11-17: Pillow/Qt official PyPI wheel SHA256 and deployed file hashes are in BUILD_PROVENANCE.json. The Python runtime remains 3.12.14; see SECURITY.md.
+
+Toolkit logo update 2026-11-17: assets/toolkit-logo.png is the image supplied by the project author for these tools. Original PNG bytes are retained; Windows icons are format/size exports. Existing third-party and font terms remain separate.
