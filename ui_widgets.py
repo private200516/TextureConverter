@@ -245,7 +245,7 @@ class BannerWidget(_MotionWidget):
                        Qt.AlignVCenter | Qt.AlignLeft, f"/ {self._total}")
         # The provided toolkit mark is cached from the full-resolution PNG.
         title = "TEXTURE CONVERTER"
-        logo_size, logo_gap = 44.0, 14.0
+        logo_size, logo_gap = 52.0, 16.0
         stat_end = nx + (QFontMetrics(_mono_font(13,QFont.Bold)).horizontalAdvance(f"/ {self._total}") if self._total else 0)
         available = max(160., w-pad-max(240.,stat_end+28)-logo_size-logo_gap)
         title_size = 30

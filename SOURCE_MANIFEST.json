@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "logo-security-release-20261117",
+  "revision": "logo-refinement-release-20261117",
   "files": [
     {
       "relative": ".gitignore",
@@ -14,13 +14,18 @@
     },
     {
       "relative": "BUILD_PROVENANCE.json",
-      "size": 95885,
-      "sha256": "8dcf01ba837354dceb4f6b160a027c3bc23b3c7187c8de815feb0562d88e31fb"
+      "size": 95887,
+      "sha256": "26c8de019c89a5d0718d352c57d03f20dfc58513c5e1d0ea5c69fe3637fce742"
     },
     {
       "relative": "LICENSE",
       "size": 35149,
       "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "relative": "LOGO_REFINEMENT_20261117.md",
+      "size": 3954,
+      "sha256": "13d8f0098fecdf8124bc3ce24a6bbcd4e6ffed83171c2ad4b508e8cb9ba1a8b3"
     },
     {
       "relative": "LOGO_RELEASE_20261117.md",
@@ -39,8 +44,8 @@
     },
     {
       "relative": "README.md",
-      "size": 8972,
-      "sha256": "75d310243212993b33aa025c0a1dec1ca5e423d850ef2ddca61703ca387e0ed4"
+      "size": 8981,
+      "sha256": "f05f706a3c56ffa984bada78829d66d5c43f1dd587e0c8ed09637a9919a63b32"
     },
     {
       "relative": "RELEASE_NOTES_20261117.md",
@@ -64,8 +69,8 @@
     },
     {
       "relative": "SECURITY_VALIDATION.json",
-      "size": 1202,
-      "sha256": "43747fea0ead4492a9dc234bb77cc9326578bacd147bceec4cace9a032e91543"
+      "size": 1204,
+      "sha256": "74ef789b3bca2c513d03ba2375c0cf4698db9e11a68737c58bde32f0e4a37c1c"
     },
     {
       "relative": "THIRD_PARTY_NOTICES.txt",
@@ -90,7 +95,7 @@
     {
       "relative": "app_motion.py",
       "size": 17931,
-      "sha256": "3c70cb7a4bbe4014a00d884afba593f989b6bff5d34e516ed6df6384516027fe"
+      "sha256": "e558fc1e87a2c82910591b8cd454edaa9eb1ac03bdaba98e110925fd796ce710"
     },
     {
       "relative": "assets/fonts/Aquire-Bold.otf",
@@ -164,13 +169,13 @@
     },
     {
       "relative": "assets/icon.ico",
-      "size": 85552,
-      "sha256": "e9d3de56ec883865d26cb859dd8380715641bf59586b99dbb22b95aa6942a8ee"
+      "size": 64112,
+      "sha256": "1ed911cbd79280f2251d2f1db39034cd16b7701573551367c23e99cf14a0c782"
     },
     {
       "relative": "assets/toolkit-logo.png",
-      "size": 835385,
-      "sha256": "bb5462c24e73a18ba7fac4e9087daca464ae6f3116429be37c665b481089810d"
+      "size": 612313,
+      "sha256": "31d8430db3b46afc4d30f1608935018eb7ef439021d8ff3c6a032c6201ddc35c"
     },
     {
       "relative": "config.json",
@@ -500,7 +505,7 @@
     {
       "relative": "ui_widgets.py",
       "size": 43070,
-      "sha256": "732ddf43d83a77cc4abd9990fb652d9552dffce86547ef1ab252937ae233432d"
+      "sha256": "a620570aee5eb432a2e10dd6b9e893201082a3e7bda9965b9fdc34708d0890fc"
     }
   ]
 }

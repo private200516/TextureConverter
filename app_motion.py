@@ -201,10 +201,10 @@ class _StartupOverlay(QWidget):
             p.setFont(self._small_font);p.setPen(QColor(T.MOTION_INK))
             p.drawText(QRectF(36,cy+41,w-72,24),Qt.AlignCenter,'ALPHA 1.0  /  '+self.author);p.restore()
             align=_out(_unit(t,390,640))
-            p.save();p.translate(cx,cy-86-10*(1-align));p.rotate(12*(1-align))
+            p.save();p.translate(cx,cy-90-10*(1-align));p.rotate(12*(1-align))
             p.setOpacity(align)
             if not self._logo.isNull():
-                size=64*(.9+.1*align)
+                size=80*(.9+.1*align)
                 p.drawPixmap(QRectF(-size/2,-size/2,size,size),self._logo,QRectF(self._logo.rect()))
             p.restore()
             p.setPen(QPen(QColor(23,26,21,45),1));p.setBrush(Qt.NoBrush)
@@ -229,7 +229,7 @@ class _StartupOverlay(QWidget):
             q=_out(_unit(t,430,570));vanish=1-_out(_unit(t,570,615))
             p.save();p.translate(cx,cy);p.rotate(12*(1-q));p.setOpacity(_out(_unit(t,430,490))*vanish)
             if not self._logo.isNull():
-                size=(72-14*q)*vanish
+                size=(88-16*q)*vanish
                 p.drawPixmap(QRectF(-size/2,-size/2,size,size),self._logo,QRectF(self._logo.rect()))
             p.restore()
 
