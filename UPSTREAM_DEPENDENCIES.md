@@ -8,14 +8,14 @@
 
 | 包 | 版本 | 说明 |
 |---|---|---|
-| PySide6-Essentials | 6.9.2 | Qt/PySide6 界面、OpenGL 与所需绑定 |
-| shiboken6 | 6.9.2 | Qt for Python 绑定支持 |
-| Pillow | 12.3.0 | 本地图像处理 |
+| PySide6-Essentials | 6.12.0 | Qt/PySide6 界面、OpenGL 与所需绑定 |
+| shiboken6 | 6.12.0 | Qt for Python 绑定支持 |
+| Pillow | 13.0.0 | 本地图像处理 |
 | numpy | 2.3.5 | 本地数组与部分 DDS 后备算法 |
 
-这些是声明的固定版本，不代表本次已下载、安装或重新测试。Qt/PySide6、Shiboken、NumPy、Pillow 和 Python 的许可应以各官方包随附的许可与元数据为准；保留现有 `THIRD_PARTY_NOTICES.txt`、`licenses/GPL-3.0.txt`、`licenses/Qt-LGPL-3.0-only.txt`，并为未来实际分发的依赖补齐对应通知。
+2026-11-17 安全更新实际下载并校验了官方 Pillow 13.0.0 与 matched Qt/PySide6/shiboken6 6.12.0 Windows wheel，并更新便携包。Qt/PySide6、Shiboken、NumPy、Pillow 和 Python 的许可应以各官方包随附的许可与元数据为准；保留现有 `THIRD_PARTY_NOTICES.txt`、`licenses/GPL-3.0.txt`、`licenses/Qt-LGPL-3.0-only.txt`，并为未来实际分发的依赖补齐对应通知。
 
-现有上游入口：[Qt for Python 6.9.2 源码](https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.9.2)、[Qt 6.9.2 子模块](https://download.qt.io/archive/qt/6.9/6.9.2/submodules/)。这些链接不表示本包包含了其完整源码；本次没有联网获取。
+现有上游入口：[Qt for Python 6.12.0 源码](https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.12.0)、[Qt 6.12.0 子模块](https://download.qt.io/archive/qt/6.12/6.12.0/submodules/)。这些链接不表示本包包含了其完整源码；本轮已读取官方元数据并校验上述 wheel；具体构建记录见 BUILD_PROVENANCE.json。
 
 ## texconv 与后备路径
 
@@ -36,3 +36,7 @@ Microsoft DirectXTex 的 `texconv.exe` **随本源码包保留在 `tools/texconv
 历史 `tools/legacy/` 构建器依赖原开发环境，只作参考。本包没有新增通用打包器，没有重建或认证发布 EXE。请从 README 的源码 venv 流程开始；源码安装不需要旧发布包的 `app/`、`runtime/`、`vendor/` 布局。
 
 English: Install pinned dependencies into a Python 3.12 venv. Third-party terms remain separate. The verified texconv tool with its MIT notice and the original user-authorized fonts/icon are included; product EXEs and packaged runtimes are not. Partial fallback is not equivalent native-codec coverage, and material-only validation does not establish DDS, gameplay, GUI or security acceptance.
+
+## 安全维护更新 / Security revision
+
+见 [SECURITY.md](SECURITY.md)。历史工具与恢复记录不代表当前依赖版本；本轮固定依赖和构建记录优先。Python 解释器仍为 3.12.14。

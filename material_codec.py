@@ -5,6 +5,7 @@ from __future__ import annotations
 import json, math, struct
 from dataclasses import dataclass, field
 from pathlib import Path
+from security_io import pinned_path
 
 class MaterialError(ValueError): pass
 
@@ -13,7 +14,7 @@ MAX_MATERIAL_BYTES = 1024 * 1024
 
 def read_material_bytes(path):
     """Bound the allocation even if a file grows between stat and read."""
-    with Path(path).open('rb') as stream:
+    with pinned_path(path), Path(path).open('rb') as stream:
         data = stream.read(MAX_MATERIAL_BYTES + 1)
     if not 8 <= len(data) <= MAX_MATERIAL_BYTES:
         raise MaterialError('Material size outside 8 B - 1 MiB')

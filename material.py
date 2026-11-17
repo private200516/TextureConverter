@@ -221,7 +221,7 @@ class BgsmTemplate:
 def load_template(path: str) -> BgsmTemplate | None:
     if not os.path.isfile(path):
         return None
-    with open(path, "rb") as f:
-        data = f.read()
+    from material_codec import read_material_bytes
+    data = read_material_bytes(path)
     slots = extract_texture_paths(data)
     return BgsmTemplate(data, slots)

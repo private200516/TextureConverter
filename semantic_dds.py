@@ -11,6 +11,7 @@ from dataclasses import replace
 import numpy as np
 from PIL import Image
 import dds
+from security_io import open_read, pinned_path, MAX_ASSET_BYTES
 from metal_reconstruction import srgb_to_linear, linear_to_srgb
 
 
@@ -90,10 +91,12 @@ def validate_mip_layout(path,*,cancel_event=None):
     """
     dds._check_cancel(cancel_event)
     info=dds.parse_dds_header(str(path))
-    with open(path,'rb') as stream:
-        raw=stream.read(148)
+    with open_read(path) as stream:
+        if dds.parse_dds_header(stream)!=info:raise ValueError('DDS header changed during validation')
+        stream.seek(0);raw=stream.read(148)
         stream.seek(0,2);file_size=stream.tell()
     if not 0<info.width<=16384 or not 0<info.height<=16384:raise ValueError('Invalid dimensions')
+    if file_size>MAX_ASSET_BYTES:raise ValueError('DDS exceeds 512 MiB file budget')
     if not 1<=info.mipmaps<=max(info.width,info.height).bit_length():raise ValueError('Invalid mip count')
     header=struct.unpack_from('<31I',raw,4)
     if header[0]!=124 or header[18]!=32:raise ValueError('Invalid DDS header sizes')
@@ -111,6 +114,7 @@ def validate_mip_layout(path,*,cancel_event=None):
     for level in range(info.mipmaps):
         dds._check_cancel(cancel_event)
         size=info.row_pitch*h if padded else _level_size(w,h,info.fmt)
+        if size>dds.MAX_DDS_PAYLOAD:raise ValueError('DDS mip exceeds bounded payload budget')
         if offset+size>file_size:raise ValueError('Truncated mip payload at '+str(level))
         layout.append((w,h,offset,size));offset+=size;w=max(1,w//2);h=max(1,h//2)
     if offset!=file_size:raise ValueError('Unexpected payload after mip chain')
@@ -120,7 +124,7 @@ def validate_mip_layout(path,*,cancel_event=None):
 def read_mip_payloads(path,*,cancel_event=None):
     """Validate and return a bounded ordinary 2D DDS mip chain."""
     info,layout=validate_mip_layout(path,cancel_event=cancel_event);result=[]
-    with open(path,'rb') as stream:
+    with open_read(path) as stream:
         for w,h,offset,size in layout:
             dds._check_cancel(cancel_event)
             stream.seek(offset);payload=dds._read_bytes(stream,size,cancel_event)
@@ -143,14 +147,14 @@ def decode_mip_levels(path,*,cancel_event=None):
         for index,(w,h,payload) in enumerate(blobs):
             dds._check_cancel(cancel_event)
             single=Path(temp)/(str(index)+'.dds')
-            single.write_bytes(dds._dds_header(w,h,1,info.fmt,len(payload))+payload)
+            with pinned_path(single),single.open('xb') as stream:stream.write(dds._dds_header(w,h,1,info.fmt,len(payload))+payload)
             images.append(dds.decode_dds_pixels(str(single),cancel_event=cancel_event))
     return images
 
 
 def _write_uncompressed(levels,path,srgb_tag=False,cancel_event=None):
     fmt='R8G8B8A8_UNORM_SRGB' if srgb_tag else 'R8G8B8A8_UNORM'
-    with open(path,'wb') as f:
+    with pinned_path(path),open(path,'xb') as f:
         dds._write_bytes(f,dds._dds_header(levels[0].shape[1],levels[0].shape[0],len(levels),fmt,levels[0].nbytes),cancel_event)
         for level in levels:
             dds._check_cancel(cancel_event)
@@ -161,7 +165,7 @@ def _copy_exclusive(source,target,cancel_event=None):
     dds._check_cancel(cancel_event)
     created=False
     try:
-        with source.open('rb') as src,target.open('xb') as dst:
+        with open_read(source) as src,pinned_path(target),target.open('xb') as dst:
             created=True
             while True:
                 dds._check_cancel(cancel_event)
@@ -194,7 +198,7 @@ def encode_semantic_dds(rgba,fmt,out_path,mipmaps=True,texconv_path=None,*,seman
         _write_uncompressed(levels,source,fmt.endswith('_SRGB'),cancel_event)
         if texconv_path and Path(texconv_path).is_file():
             command=[str(texconv_path),'-nologo','-nogpu','-f',fmt,'-m',str(len(levels)),
-                     '-dx10','-y','-o',str(encoded),'--',str(source)]
+                     '-dx10','-o',str(encoded),'--',str(source)]
             p=dds._run_texconv(command,cancel_event)
             if p.returncode:raise dds.DDSError('Semantic texconv failed: '+(p.stderr or p.stdout).strip())
             produced=encoded/'prepared.dds'
@@ -211,7 +215,7 @@ def encode_semantic_dds(rgba,fmt,out_path,mipmaps=True,texconv_path=None,*,seman
             return fmt,'numpy semantic mips; uncompressed DDS output'
         blobs=[dds._encode_level_fallback(level,fmt,cancel_event) for level in levels]
         prepared=Path(temp)/'fallback.dds'
-        with prepared.open('wb') as target:
+        with pinned_path(prepared),prepared.open('xb') as target:
             dds._write_bytes(target,dds._dds_header(rgba.shape[1],rgba.shape[0],len(levels),fmt,len(blobs[0])),cancel_event)
             for blob in blobs:dds._write_bytes(target,blob,cancel_event)
         read_mip_payloads(prepared,cancel_event=cancel_event)
@@ -228,10 +232,12 @@ def decode_normal_dds(path,info=None,*,cancel_event=None):
     an independent decoder correctness fix, not part of metal reconstruction.
     """
     dds._check_cancel(cancel_event)
-    info=info or dds.parse_dds_header(str(path))
+    current=dds.parse_dds_header(str(path))
+    if info is not None and info!=current:raise dds.DDSError('DDS header changed between inspection and normal decode')
+    info=current
     if info.fmt!='BC5_SNORM':return dds.decode_dds_pixels(str(path),info,cancel_event=cancel_event)
     validate_mip_layout(path,cancel_event=cancel_event)
     bw,bh=dds._blocks_dims(info.width,info.height)
-    with open(path,'rb') as stream:
+    with open_read(path) as stream:
         stream.seek(info.data_offset);raw=dds._read_bytes(stream,bw*bh*16,cancel_event)
     return dds._decode_bc_payload(raw,info,clamp_snorm=True,cancel_event=cancel_event)

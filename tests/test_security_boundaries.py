@@ -3,6 +3,7 @@ These tests were not executed during the static-only phase 5A.
 """
 import io
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,9 +92,14 @@ class MaskReadBoundaryTests(unittest.TestCase):
             def __exit__(self,*args):return False
             def convert(self,*args):raise AssertionError('pixels must not decode')
             def __array__(self,*args,**kwargs):raise AssertionError('pixels must not copy')
-        with patch('texture_api.Image.open',return_value=HeaderOnly()):
+        with tempfile.NamedTemporaryFile(suffix='.png',delete=False) as source:
+            path=Path(source.name)
+            source.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'+struct.pack('>IIBBBBBI',8192,8192,8,0,0,0,0,0))
+        self.addCleanup(path.unlink)
+        with patch('texture_api.Image.open',return_value=HeaderOnly()) as decoder:
             with self.assertRaisesRegex(ValueError,'MASK_SIZE_MISMATCH'):
-                texture_api._mask({'edit_mask_path':'large.png'},'manual_mask','edit_mask_path',(8,8))
+                texture_api._mask({'edit_mask_path':str(path)},'manual_mask','edit_mask_path',(8,8))
+        decoder.assert_not_called()
 
     def test_mask_budget_rejects_before_open(self):
         with patch('texture_api.Image.open',side_effect=AssertionError('must not open')):

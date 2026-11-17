@@ -2,6 +2,7 @@
 from pathlib import Path
 import os, uuid
 from material_codec import Material, MaterialError, parse, serialize, layout, DEFAULTS
+from security_io import assert_no_reparse,pinned_path,publish_new
 BUILD='ALPHA 1.0 compatibility 2026-10-14'
 
 def convert_material(source,direction='76-to-4',texture_replacements=None,*,json_kind=None):
@@ -45,21 +46,20 @@ def convert_material(source,direction='76-to-4',texture_replacements=None,*,json
               'source_format':src.source_info.get('source_format','binary'),'source_info':dict(src.source_info)}
 
 def convert_file(src,dest,direction='76-to-4',dry_run=False,_staged=False,texture_replacements=None,json_kind=None,**unused):
-    src=Path(src).resolve(); dest=Path(dest).resolve()
+    src=assert_no_reparse(src); dest=assert_no_reparse(dest)
     if src==dest: raise MaterialError('Input is read-only; choose another destination')
     m,info=convert_material(src,direction,texture_replacements,json_kind=json_kind)
     info.update(source=str(src),output=str(dest),dry_run=dry_run,direction=direction)
     if dry_run:return info
     if dest.exists():raise FileExistsError(dest)
-    dest.parent.mkdir(parents=True,exist_ok=True)
+    with pinned_path(dest.parent):dest.parent.mkdir(parents=True,exist_ok=True)
     tmp=dest if _staged else dest.with_name('.material-'+uuid.uuid4().hex+'.tmp')
     try:
-        with tmp.open('xb') as f:f.write(serialize(m))
+        with pinned_path(tmp),tmp.open('xb') as f:f.write(serialize(m))
         check=parse(tmp)
         if check.fields!=m.fields:raise MaterialError('Written material differs from serialized fields')
         if not _staged:
-            if os.name=='nt':tmp.rename(dest)
-            else:os.link(tmp,dest);tmp.unlink()
+            publish_new(tmp,dest)
     finally:
         if not _staged and tmp.exists():tmp.unlink()
     return info

@@ -19,7 +19,8 @@ def main():
     cfg=Config(input_dir=src,output_dir=dst,metal_mode=a.metal_mode,generate_mipmap=not a.no_mipmaps,overwrite=False)
     cfg.direction=a.direction
     if a.options:
-        with open(a.options,encoding='utf8') as f:cfg.metal_options=processing_options(json.load(f), '--options')
+        from security_io import read_bounded, json_bounded, MAX_JSON_BYTES
+        cfg.metal_options=processing_options(json_bounded(read_bounded(a.options,MAX_JSON_BYTES,'Options')), '--options')
     cancel=threading.Event()
     previous=signal.signal(signal.SIGINT,lambda *_:cancel.set())
     jobs=scan_jobs(src,a.direction,include_textures=not a.materials_only,cancel_event=cancel)

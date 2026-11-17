@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtOpenGL import QOpenGLShaderProgram, QOpenGLShader, QOpenGLBuffer, QOpenGLTexture
 import i18n
-from nif_preview_data import load_scene
+from preview_process import load_scene_isolated
 
 VERTEX_SHADER = '''
 #version 120
@@ -121,7 +121,7 @@ class LoadWorker(QThread):
         self.cancel_event = threading.Event()
     def run(self):
         try:
-            scene = load_scene(*self.args, cancel=self.cancel_event)
+            scene = load_scene_isolated(*self.args, cancel=self.cancel_event)
             if not self.cancel_event.is_set(): self.loaded.emit(scene)
         except InterruptedError:
             pass

@@ -21,6 +21,9 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import nullcontext
+from pathlib import Path
+from security_io import open_read, pinned_path, MAX_ASSET_BYTES
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -91,6 +94,17 @@ _UNCOMPRESSED_BYTES = {
     "B8G8R8A8_UNORM": 4, "B8G8R8A8_UNORM_SRGB": 4,
     "B8G8R8_UNORM": 3, "R8_UNORM": 1,
 }
+
+MAX_DDS_PIXELS = 64 * 1024 * 1024
+MAX_DDS_PAYLOAD = 256 * 1024 * 1024
+
+
+def _decode_budget(info):
+    if (not 0 < info.width <= 16384 or not 0 < info.height <= 16384 or
+            info.width * info.height > MAX_DDS_PIXELS):
+        raise DDSError('DDS dimensions exceed bounded decoder budget (64 megapixels)')
+    if not 1 <= info.mipmaps <= max(info.width, info.height).bit_length():
+        raise DDSError('Invalid mipmap count')
 
 
 class DDSError(Exception):
@@ -176,13 +190,21 @@ def _stop_encoder(proc):
 
 
 def _run_texconv(command, cancel_event=None, timeout=600):
+    _check_cancel(cancel_event)
+    with pinned_path(command[0]) as executable:
+        return _run_texconv_pinned([str(executable),*command[1:]],cancel_event,timeout)
+
+
+def _run_texconv_pinned(command, cancel_event=None, timeout=600):
     """Wait in short intervals without pipe deadlocks or unbounded diagnostics."""
     _check_cancel(cancel_event)
     # Separate files let the encoder write freely while wait() polls. The
     # bounded size check and bounded readback keep diagnostics off the heap.
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        environment={key:value for key,value in os.environ.items() if not key.upper().startswith('PYTHON') and key.upper() not in ('QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QML2_IMPORT_PATH')}
+        if os.name=='nt':environment['PATH']=os.pathsep.join((str(Path(command[0]).parent),str(Path(os.environ.get('SystemRoot','C:/Windows'))/'System32')))
         proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout,
-                                stderr=stderr, shell=False,
+                                stderr=stderr, shell=False,cwd=str(Path(command[0]).parent),env=environment,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         try:
             deadline = time.monotonic() + timeout
@@ -240,7 +262,8 @@ class DdsInfo:
 
 def parse_dds_header(path: str) -> DdsInfo:
     """解析 DDS 头部，返回 DdsInfo。不读取像素数据。"""
-    with open(path, "rb") as f:
+    with (nullcontext(path) if hasattr(path, 'read') else open_read(path)) as f:
+        f.seek(0)
         magic = f.read(4)
         if magic != b"DDS ":
             raise DDSError(f"不是 DDS 文件: {path}")
@@ -253,6 +276,8 @@ def parse_dds_header(path: str) -> DdsInfo:
         if fields[0] != 124 or fields[18] != 32:
             raise DDSError(f"无效的 DDS 头大小: {path}")
         height, width, mipmap = fields[2], fields[3], fields[6]
+        if fields[5] > 1 or fields[27] & 0xFE00:
+            raise DDSError('Only ordinary single 2D DDS images are supported')
         pf_flags = fields[19]
         pf_fourcc = struct.pack("<I", fields[20])
         pf_rgbbitcount = fields[21]
@@ -265,6 +290,9 @@ def parse_dds_header(path: str) -> DdsInfo:
                 if len(dx10) != 20:
                     raise DDSError(f"DX10 扩展头长度不足: {path}")
                 dxgi = struct.unpack("<I", dx10[:4])[0]
+                _, dimension, misc, array_size, _ = struct.unpack('<5I', dx10)
+                if dimension != 3 or array_size != 1 or misc & 4:
+                    raise DDSError('Array/cube/volume DDS is unsupported')
                 info.fmt = DXGI_TO_FORMAT.get(dxgi, f"DXGI_{dxgi}")
                 info.dx10 = True
                 info.data_offset = 148
@@ -304,6 +332,7 @@ def parse_dds_header(path: str) -> DdsInfo:
             info.row_pitch = fields[4]
             if info.row_pitch < info.width * _UNCOMPRESSED_BYTES[info.fmt]:
                 raise DDSError(f"DDS 行步长小于像素宽度: {path}")
+        _decode_budget(info)
         return info
 
 
@@ -502,25 +531,32 @@ def decode_dds_pixels(path: str, info: DdsInfo | None = None, *, cancel_event=No
     decoder explicitly requests its separate -128 endpoint correction.
     """
     _check_cancel(cancel_event)
-    info = info or parse_dds_header(path)
-    w, h, fmt = info.width, info.height, info.fmt
-    if w <= 0 or h <= 0:
-        raise DDSError('Invalid DDS dimensions')
-    if fmt not in OWN_DECODERS:
-        if Image is None:
-            raise DDSError(f'Pillow required to decode {fmt}')
-        try:
-            with Image.open(path) as im:
-                pixels = np.asarray(im.convert('RGBA'), dtype=np.uint8).copy()
-            _check_cancel(cancel_event)
-            return pixels
-        except CancellationRequested:
-            raise
-        except Exception as exc:
-            raise DDSError(f'Pillow cannot decode {fmt}: {exc}') from exc
-    bw, bh = _blocks_dims(w, h)
-    need = bw*bh*(8 if fmt.startswith(('BC1', 'BC4')) else 16) if info.is_bc else _byte_layout(info)[1]
-    with open(path, 'rb') as stream:
+    with open_read(path) as stream:
+        current = parse_dds_header(stream)
+        if info is not None and current != info:
+            raise DDSError('DDS header changed between inspection and decode')
+        info = current
+        _decode_budget(info)
+        w, h, fmt = info.width, info.height, info.fmt
+        if os.fstat(stream.fileno()).st_size > MAX_ASSET_BYTES:
+            raise DDSError('DDS exceeds 512 MiB file budget')
+        if fmt not in OWN_DECODERS:
+            if Image is None:
+                raise DDSError(f'Pillow required to decode {fmt}')
+            try:
+                stream.seek(0)
+                with Image.open(stream, formats=['DDS']) as im:
+                    if im.size != (w, h): raise DDSError('DDS decoder dimensions changed')
+                    pixels = np.asarray(im.convert('RGBA'), dtype=np.uint8).copy()
+                _check_cancel(cancel_event)
+                return pixels
+            except CancellationRequested:
+                raise
+            except Exception as exc:
+                raise DDSError(f'Pillow cannot decode {fmt}: {exc}') from exc
+        bw, bh = _blocks_dims(w, h)
+        need = bw*bh*(8 if fmt.startswith(('BC1', 'BC4')) else 16) if info.is_bc else _byte_layout(info)[1]
+        if need > MAX_DDS_PAYLOAD: raise DDSError('DDS base mip exceeds bounded payload budget')
         stream.seek(info.data_offset); raw = _read_bytes(stream, need, cancel_event)
     if len(raw) != need:
         raise DDSError(f'Truncated DDS base mip: {path}')
@@ -549,14 +585,13 @@ def encode_with_texconv(texconv_path: str, rgba: np.ndarray, fmt: str,
 
     try:
         img = Image.fromarray(rgba, "RGBA")
-        img.save(tga_path, format="TGA")
+        with pinned_path(tga_path),open(tga_path,'xb') as stream:img.save(stream, format="TGA")
         _check_cancel(cancel_event)
     
         cmd = [
             texconv_path,
             "-f", fmt,
             "-m", "0" if mipmaps else "1",
-            "-y",
             "-o", workdir,
             "--", tga_path,
         ]
@@ -568,7 +603,23 @@ def encode_with_texconv(texconv_path: str, rgba: np.ndarray, fmt: str,
         if not os.path.exists(produced):
             raise DDSError(f"texconv 未生成输出: {produced}")
         _check_cancel(cancel_event)
-        shutil.move(produced, out_path)
+        from semantic_dds import validate_mip_layout
+        validate_mip_layout(produced,cancel_event=cancel_event)
+        # Exclusive copy also works across volumes; shutil.move's fallback
+        # uses wb and can truncate an existing hard-link destination.
+        created=False
+        try:
+            with open_read(produced) as source,pinned_path(out_path),open(out_path,'xb') as target:
+                created=True;total=0
+                while True:
+                    _check_cancel(cancel_event);block=source.read(1024*1024)
+                    if not block:break
+                    total+=len(block)
+                    if total>MAX_ASSET_BYTES:raise DDSError('Encoded DDS exceeds 512 MiB budget')
+                    _write_bytes(target,block,cancel_event)
+        except Exception:
+            if created:os.unlink(out_path)
+            raise
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

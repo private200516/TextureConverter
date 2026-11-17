@@ -7,18 +7,18 @@ No endorsement by OpenAI, Bethesda, Microsoft, Qt, or dependency authors is impl
 
 Bundled dependencies retain their separate terms:
 - Python 3.12.14: runtime/LICENSE.txt. Copied from the local Codex runtime.
-- Qt for Python / PySide6 Essentials and Shiboken6 6.9.2:
+- Qt for Python / PySide6 Essentials and Shiboken6 6.12.0:
   metadata declares LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.
-  https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.9.2
-  https://download.qt.io/archive/qt/6.9/6.9.2/submodules/
+  https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.12.0
+  https://download.qt.io/archive/qt/6.12/6.12.0/submodules/
   https://www.qt.io/licensing/open-source-lgpl-obligations
   Qt Core/Gui/Widgets/OpenGL/OpenGLWidgets/Svg/Test bindings and required
   native plugins are deployed from the existing official wheel. QML, SDK
   tools and unused Qt modules are omitted. No third-party renderer is added.
   Qt DLLs and Python bindings remain loose and replaceable in vendor/.
-  Unmodified upstream wheel metadata/notices are retained in vendor/*dist-info/.
+  Original upstream wheel metadata/notices are retained (deployment is pruned) in vendor/*dist-info/.
 - NumPy 2.3.5: vendor/numpy-2.3.5.dist-info/licenses; includes bundled library notices.
-- Pillow 12.3.0: vendor/pillow-12.3.0.dist-info/licenses.
+- Pillow 13.0.0: vendor/pillow-13.0.0.dist-info/licenses.
 - Microsoft DirectXTex texconv: MIT; https://github.com/microsoft/DirectXTex
   The restored tools/texconv.exe had a valid Authenticode signature at build audit.
   Exact executable SHA256 is recorded in BUILD_INFO.json. No runtime download.
@@ -34,3 +34,5 @@ included in the distributable. Local real-asset validation reports are separate.
 All runtime components are unpacked files. There is no UPX, PyInstaller onefile,
 self-extracting application payload, remote update, telemetry, or cloud inference.
 New launcher is unsigned; this build does not guarantee antivirus acceptance.
+
+Security revision 2026-11-17: Pillow/Qt official PyPI wheel SHA256 and deployed file hashes are in BUILD_PROVENANCE.json. The Python runtime remains 3.12.14; see SECURITY.md.

@@ -11,6 +11,8 @@ from material_converter import convert_material, BUILD
 from material_jobs import scan_jobs, sha256, safe_relative, asset_relative
 from metal_reconstruction import ColorContract, MetalOptions, TargetProfile, reconstruct, align_numeric, MetalResult, ALGORITHM_VERSION, _validate_config, _array
 from logger import ConversionLog
+from security_io import (assert_no_reparse, open_read, pinned_path, publish_new,
+                         MAX_ASSET_BYTES, png_header)
 
 Cancelled=dds.CancellationRequested
 
@@ -20,22 +22,42 @@ def _check(cancel):
 
 def _source_hash(path,cancel=None):
     digest=hashlib.sha256()
-    with open(path,'rb') as stream:
+    with open_read(path) as stream:
+        if os.fstat(stream.fileno()).st_size>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset exceeds 512 MiB')
+        total=0
         while True:
             _check(cancel);block=stream.read(1024*1024)
             if not block:break
+            total+=len(block)
+            if total>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset grew beyond 512 MiB')
             digest.update(block)
     _check(cancel)
     return digest.hexdigest()
 
 
 def _copy_file(source,target,cancel=None):
-    with open(source,'rb') as src,open(target,'wb') as dst:
+    with open_read(source) as src,pinned_path(target),open(target,'xb') as dst:
+        if os.fstat(src.fileno()).st_size>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset exceeds 512 MiB')
+        total=0
         while True:
             _check(cancel);block=src.read(1024*1024)
             if not block:break
+            total+=len(block)
+            if total>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset grew beyond 512 MiB')
             dds._write_bytes(dst,block,cancel)
-    _check(cancel);shutil.copystat(source,target)
+    _check(cancel)
+
+
+def _validate_job_sources(job):
+    identifier=job.get('id','')
+    if not isinstance(identifier,str) or not 1<=len(identifier)<=128 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in identifier):
+        raise ValueError('Unsafe job identifier')
+    root=assert_no_reparse(job['asset_root'])
+    if root.is_file():root=root.parent
+    for value in [job.get('material_path'),*job.get('texture_paths',{}).values()]:
+        if value and not assert_no_reparse(value).is_relative_to(root):
+            raise ValueError('Source escapes selected resource root')
+    return root
 
 def _json(value):
     if isinstance(value,np.ndarray):return {'array_sha256':hashlib.sha256(value.tobytes()).hexdigest(),'shape':list(value.shape),'dtype':str(value.dtype)}
@@ -60,7 +82,7 @@ def _options(cfg=None,extra=None):
 
 def _codec_identity(external=True):
     # This fixed installation path is never taken from processing configuration.
-    tool=(Path(__file__).parent/'tools'/'texconv.exe').resolve()
+    tool=assert_no_reparse(Path(__file__).parent/'tools'/'texconv.exe')
     if external and tool.is_file():
         return {'backend':'texconv','path':str(tool),'sha256':sha256(tool)}
     return {'backend':'numpy-fallback','path':None,'sha256':None}
@@ -92,6 +114,7 @@ def _header(path):
     return info
 
 def _load(job,cancel=None,semantic_normal=False,preview=False,dependency_hashes=None,stage_cb=None):
+    _validate_job_sources(job)
     if 'AMBIGUOUS_TEXTURE_PAIRING' in job.get('diagnostics',[]):raise ValueError('AMBIGUOUS_TEXTURE_PAIRING: refusing to choose a filename match')
     arrays={};headers={};hashes=dict(dependency_hashes or {})
     if job.get('material_path') and job['material_path'] not in hashes:hashes[job['material_path']]=_source_hash(job['material_path'],cancel)
@@ -160,12 +183,15 @@ def _mask(opts,key,pathkey,shape):
     if v is None and not path:return None
     shape=_mask_budget(shape)
     if v is None:
-        with Image.open(path) as im:
-            if im.format!='PNG' or im.mode not in ('1','L','I;16','I'):raise ValueError('Masks must be grayscale PNG, not RGB/palette images')
-            if im.size!=(shape[1],shape[0]):
-                raise ValueError('MASK_SIZE_MISMATCH: masks must match source diffuse dimensions; no silent resize')
-            if im.mode in ('I;16','I'):v=np.asarray(im,dtype=np.float64)/65535.
-            else:v=np.asarray(im.convert('L'),dtype=np.float64)/255.
+        with open_read(path) as stream:
+            if os.fstat(stream.fileno()).st_size>256*1024*1024:raise ValueError('MASK_FILE_SIZE_LIMIT: mask exceeds 256 MiB')
+            png_header(stream,shape)
+            with Image.open(stream,formats=['PNG']) as im:
+                if im.format!='PNG' or im.mode not in ('1','L','I;16','I'):raise ValueError('Masks must be grayscale PNG, not RGB/palette images')
+                if im.size!=(shape[1],shape[0]):
+                    raise ValueError('MASK_SIZE_MISMATCH: masks must match source diffuse dimensions; no silent resize')
+                if im.mode in ('I;16','I'):v=np.asarray(im,dtype=np.float64)/65535.
+                else:v=np.asarray(im.convert('L'),dtype=np.float64)/255.
     _mask_shape(v,shape)
     a=np.asarray(v,dtype=np.float64)
     if a.shape!=shape:raise ValueError('MASK_SIZE_MISMATCH: masks must match source diffuse dimensions; no silent resize')
@@ -254,6 +280,11 @@ def _relative_for(job,role):
     return rel.with_name(stem+'_'+role+'.dds').as_posix()
 
 def _encode(array,role,path,opts,cancel_event=None):
+    with pinned_path(path):
+        return _encode_pinned(array,role,path,opts,cancel_event)
+
+
+def _encode_pinned(array,role,path,opts,cancel_event=None):
     _check(cancel_event)
     fmt=opts.get({'d':'diffuse_fmt','g':'glow_fmt','n':'normal_fmt','s':'specular_fmt'}.get(role,''),'BC7_UNORM' if role in ('d','g') else 'BC5_UNORM')
     if role in ('d','g') and fmt=='BC1_UNORM' and material.has_alpha(array):fmt='BC3_UNORM'
@@ -285,15 +316,16 @@ def _encode(array,role,path,opts,cancel_event=None):
     return dict(format=used,width=h.width,height=h.height,mips=h.mipmaps,compression_mae=float(err.mean()),compression_max=float(err.max()),warning=warn,backend=backend,codec_identity=identity,semantic=role)
 
 def _safe_output(root,relative):
-    p=(root/safe_relative(relative)).resolve()
-    if not p.is_relative_to(root.resolve()):raise ValueError('Output escapes run root')
+    root=assert_no_reparse(root)
+    p=assert_no_reparse(root/safe_relative(relative))
+    if not p.is_relative_to(root):raise ValueError('Output escapes run root')
     return p
 
 def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cancel_event=None,log=None):
     opts=_options(extra=options)
     if '_codec_identity' not in opts:
         opts.update(_codec_context(opts.get('texconv_path') is not False))
-    out=Path(output_root).resolve();source_root=Path(job['asset_root']).resolve()
+    out=assert_no_reparse(output_root);source_root=_validate_job_sources(job)
     if source_root.is_file():source_root=source_root.parent
     if out==source_root or out.is_relative_to(source_root) or source_root.is_relative_to(out):raise ValueError('Input and output may not overlap')
     _check(cancel_event)
@@ -311,7 +343,16 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
         info['plan']=dict(textures=job['texture_paths'],references=job['texture_references'],diagnostics=job['diagnostics'])
         return info
     if direction!='76-to-4' and job['texture_paths'] and job.get('include_textures',True):raise ValueError('REVERSE_DDS_UNSUPPORTED: packed FO4 channels cannot reconstruct original FO76 reflectance and lighting')
-    out.mkdir(parents=True,exist_ok=True);stage=Path(tempfile.mkdtemp(prefix='.staging-'+job['id']+'-',dir=out));made=[];manifest_tmp=None;committed=False
+    from contextlib import ExitStack
+    pins=ExitStack()
+    try:
+        with pinned_path(out):out.mkdir(parents=True,exist_ok=True)
+        pins.enter_context(pinned_path(out))
+        stage=Path(tempfile.mkdtemp(prefix='.staging-'+job['id']+'-',dir=out))
+        pins.enter_context(pinned_path(stage))
+    except Exception:
+        pins.close();raise
+    made=[];manifest_tmp=None;committed=False
     try:
         replacements={};records={};hashes={};meta=None;cache_key=None;texture_cache=opts.get('_texture_cache')
         if job.get('include_textures',True):
@@ -378,7 +419,9 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
                     if not target.exists():target.parent.mkdir(parents=True,exist_ok=True);_copy_file(src,target,cancel_event);records[rel]={'copied_dependency':True};hashes[str(src)]=_source_hash(src,cancel_event)
                 if mat.fields.get('RootMaterialPath'):raise ValueError('ROOT_MATERIAL_DEPENDENCY: convert parent chain explicitly before grouped deployment')
             else:info['warnings'].append('MATERIAL_ONLY: texture dependencies were not packaged or verified')
-            rel=job['relative_path'];target=_safe_output(stage,rel);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(serialize(mat));parse(target);records[rel]={'material_readback':True}
+            rel=job['relative_path'];target=_safe_output(stage,rel);target.parent.mkdir(parents=True,exist_ok=True)
+            with pinned_path(target),target.open('xb') as stream:stream.write(serialize(mat))
+            parse(target);records[rel]={'material_readback':True}
         _check(cancel_event)
         for src,h in hashes.items():
             _check(cancel_event)
@@ -394,10 +437,15 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
             record['sha256']=h;info['outputs'].append(rel)
         # Completion manifest is published last. Roll back only new files if any rename fails.
         for src,dst in pending:
-            _check(cancel_event);dst.parent.mkdir(parents=True,exist_ok=True);src.rename(dst);made.append(dst)
+            _check(cancel_event)
+            with pinned_path(dst.parent):dst.parent.mkdir(parents=True,exist_ok=True)
+            pins.enter_context(pinned_path(dst.parent))
+            publish_new(src,dst);made.append(dst)
         info.update(validation=records,source_hashes=hashes,status='committed',processing_key=hashlib.sha256((json.dumps(hashes,sort_keys=True)+fingerprint).encode()).hexdigest(),variants=job.get('_variant_keys',{}))
-        manifests=out/'.manifests';manifests.mkdir(exist_ok=True)
-        manifest=manifests/(job['id']+'.json');tmp=manifests/(job['id']+'.tmp')
+        manifests=_safe_output(out,'.manifests')
+        with pinned_path(manifests):manifests.mkdir(exist_ok=True)
+        pins.enter_context(pinned_path(manifests))
+        manifest=_safe_output(out,'.manifests/'+job['id']+'.json');tmp=_safe_output(out,'.manifests/'+job['id']+'.tmp')
         _check(cancel_event)
         with tmp.open('x',encoding='utf8') as stream:
             manifest_tmp=tmp;stream.write(json.dumps(info,indent=2,default=_json))
@@ -413,6 +461,7 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
         raise
     finally:
         if manifest_tmp is not None:manifest_tmp.unlink(missing_ok=True)
+        pins.close()
         shutil.rmtree(stage)
 
 
@@ -476,11 +525,12 @@ class _BatchReports:
 
 def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_only=False,dry_run=False):
     opts=_options(cfg);overrides=job_options(getattr(cfg,'job_overrides',{}))
-    root=Path(cfg.output_dir).resolve();input_root=Path(cfg.input_dir).resolve()
+    root=assert_no_reparse(cfg.output_dir);input_root=assert_no_reparse(cfg.input_dir)
     if root==input_root or root.is_relative_to(input_root) or input_root.is_relative_to(root):raise ValueError('Input and output directories must not overlap')
     checked_roots=set()
     for job in jobs:
         if cancel_event is not None and cancel_event.is_set():break
+        _validate_job_sources(job)
         if job['asset_root'] in checked_roots:continue
         asset=Path(job['asset_root']).resolve();checked_roots.add(job['asset_root'])
         if root==asset or root.is_relative_to(asset) or asset.is_relative_to(root):raise ValueError('Output may not overlap any source resource root')
@@ -528,7 +578,8 @@ def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_onl
                     for name,arr in result['views'].items():
                         _check(cancel_event)
                         a=np.asarray(arr);a=np.rint(np.clip(a,0,1)*255).astype(np.uint8) if a.dtype.kind=='f' else a
-                        Image.fromarray(a).save(dest/(name+'.png'))
+                        target=dest/(name+'.png')
+                        with pinned_path(target),target.open('xb') as stream:Image.fromarray(a).save(stream,format='PNG')
                     result={'id':job['id'],'name':job['name'],'status':'analyzed','diagnostics':result['diagnostics'],'metadata':result['metadata']}
                 else:result=run_job(job,run/'converted',direction=getattr(cfg,'direction','76-to-4'),dry_run=dry_run,options=opt,cancel_event=cancel_event)
                 log.add('OK',job['name'],'Plan validated' if dry_run else 'Analysis exported' if analyze_only else 'Validated group committed')

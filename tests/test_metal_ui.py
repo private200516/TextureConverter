@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 import time
 import unittest
+from unittest.mock import patch
 import numpy as np
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
@@ -45,6 +46,16 @@ class UITests(unittest.TestCase):
         c=self.w._collect();self.assertEqual(c.metal_mode,'manual')
         from config import load_config
         self.assertEqual(load_config().job_overrides['id']['reconstruction_strength'],.3)
+    def test_close_during_cancelled_preview_has_no_late_error_dialog(self):
+        dialog=MetalDialog(self.w.metal_panel,str(self.root));dialog.show();self.wait(dialog)
+        def cancelled():
+            if not dialog.cancel_event.wait(5):raise RuntimeError('Cancellation was not delivered')
+            raise InterruptedError('Preview loading cancelled')
+        with patch('metal_ui.QMessageBox.warning') as warning:
+            dialog._start(cancelled,lambda result:None);dialog.reject();self.wait(dialog)
+            warning.assert_not_called()
+        self.assertTrue(dialog.closed_pending);self.assertFalse(dialog.isVisible())
+        dialog.deleteLater();QTest.qWait(10)
     def test_real_preview_editor_and_confirm(self):
         data=self.root/'textures';data.mkdir()
         for role,value in [('d',12),('r',200),('l',160)]:

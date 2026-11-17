@@ -4,19 +4,18 @@ import hashlib, os, time
 from collections import OrderedDict
 from pathlib import Path, PurePosixPath
 from material_codec import parse, read_material_bytes
+from security_io import safe_relative, assert_no_reparse, open_read, pinned_path
+
+MAX_SCAN_FILES = 250_000
+MAX_SCAN_DIRECTORIES = 250_000
+MAX_SCAN_ENTRIES = 2_000_000
+MAX_SCAN_BYTES = 1024 * 1024 * 1024 * 1024
 
 def sha256(path):
     h=hashlib.sha256()
-    with open(path,'rb') as f:
+    with open_read(path) as f:
         for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
     return h.hexdigest()
-
-def safe_relative(value):
-    s=str(value).replace('\\','/')
-    if s.startswith('/') or s.endswith('/'):raise ValueError('Absolute or directory asset path is not allowed')
-    p=PurePosixPath(s)
-    if not s or ':' in s or any(t in ('..','.') for t in p.parts):raise ValueError('Unsafe relative asset path: '+str(value))
-    return p.as_posix()
 
 class PreparedJobs(list):
     """List-compatible queue with a directory signature for optional GUI reuse."""
@@ -44,18 +43,54 @@ def scan_context_matches(context, root, direction='76-to-4', include_textures=Tr
 
 
 def walk_files(root,cancel_event=None,directory_stamps=None):
-    root=Path(root).resolve()
+    """Yield sorted files with finite tree and resource budgets.
+
+    Count every directory entry while scandir streams it, before collecting a
+    bounded directory for sorting. DDS/BGSM/BGEM files also share count/byte
+    limits. The selected root and traversed directories must not be reparse
+    points; observed links below them are skipped.
+    """
+    import stat
+    def cancelled():return cancel_event is not None and cancel_event.is_set()
+    def limit(code,message):raise ValueError(code+': '+message+'; select a smaller asset directory or process in batches')
+    def resource(path):return Path(path).suffix.lower() in ('.dds','.bgsm','.bgem')
+    if cancelled():return
+    root=assert_no_reparse(root)
     if root.is_file():
+        info=root.stat()
+        if resource(root):
+            if MAX_SCAN_FILES<1:limit('SCAN_FILE_LIMIT',f'input tree exceeds {MAX_SCAN_FILES:,} resource files')
+            if info.st_size>MAX_SCAN_BYTES:limit('SCAN_BYTE_LIMIT',f'selected assets exceed {MAX_SCAN_BYTES:,} bytes')
         if directory_stamps is not None:directory_stamps[str(root)]=_stamp(root)
         yield root;return
-    for base,dirs,files in os.walk(root,followlinks=False):
-        if cancel_event is not None and cancel_event.is_set():return
-        if directory_stamps is not None:directory_stamps[str(base)]=_stamp(base)
-        dirs[:]=sorted(x for x in dirs if not (Path(base)/x).is_symlink() and not (Path(base)/x).is_junction())
+    if not root.is_dir():raise ValueError('Scan root must be a regular local file or directory')
+    if MAX_SCAN_DIRECTORIES<1:limit('SCAN_DIRECTORY_LIMIT',f'input tree exceeds {MAX_SCAN_DIRECTORIES:,} directories')
+    pending=[root];seen=files_seen=selected_bytes=0;directories_seen=1
+    while pending:
+        if cancelled():return
+        base=pending.pop();directories=[];files=[]
+        with pinned_path(base),os.scandir(base) as entries:
+            if directory_stamps is not None:directory_stamps[str(base)]=_stamp(base)
+            for entry in entries:
+                if cancelled():return
+                seen+=1
+                if seen>MAX_SCAN_ENTRIES:limit('SCAN_ENTRY_LIMIT',f'input tree exceeds {MAX_SCAN_ENTRIES:,} directory entries')
+                info=entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode) or getattr(info,'st_file_attributes',0)&0x400:continue
+                if stat.S_ISDIR(info.st_mode):
+                    directories_seen+=1
+                    if directories_seen>MAX_SCAN_DIRECTORIES:limit('SCAN_DIRECTORY_LIMIT',f'input tree exceeds {MAX_SCAN_DIRECTORIES:,} directories')
+                    directories.append(entry.name)
+                elif stat.S_ISREG(info.st_mode):
+                    if resource(entry.name):
+                        files_seen+=1;selected_bytes+=info.st_size
+                        if files_seen>MAX_SCAN_FILES:limit('SCAN_FILE_LIMIT',f'input tree exceeds {MAX_SCAN_FILES:,} resource files')
+                        if selected_bytes>MAX_SCAN_BYTES:limit('SCAN_BYTE_LIMIT',f'selected assets exceed {MAX_SCAN_BYTES:,} bytes')
+                    files.append(entry.name)
         for name in sorted(files):
-            if cancel_event is not None and cancel_event.is_set():return
-            p=Path(base)/name
-            if not p.is_symlink() and not p.is_junction():yield p
+            if cancelled():return
+            yield base/name
+        pending.extend(base/name for name in sorted(directories,reverse=True))
 
 def asset_root(root):
     p=Path(root).resolve()
@@ -95,13 +130,13 @@ def resolve_reference(base,reference,category='textures'):
     rel=safe_relative(reference)
     if rel.lower().startswith('data/'+category+'/'):rel=rel[5:]
     if rel.split('/')[0].lower()!=category:rel=category+'/'+rel
-    candidate=(base/rel).resolve()
+    candidate=assert_no_reparse(base/rel)
     if not candidate.is_relative_to(base):raise ValueError('Reference escapes resource root')
     return candidate,rel
 
 def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,progress_cb=None):
     if direction not in ('76-to-4','4-to-76'):raise ValueError('Invalid direction')
-    root=Path(root).resolve();base=asset_root(root)
+    root=assert_no_reparse(root);base=asset_root(root)
     if not root.exists():raise FileNotFoundError(root)
     stamps={};seen=0;last_progress=time.monotonic()
     def progress(name,force=False):

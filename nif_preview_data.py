@@ -58,9 +58,10 @@ class Reader:
 class NifReader:
     def __init__(self, path):
         path = Path(path)
-        if path.stat().st_size > MAX_NIF_BYTES:
-            raise PreviewError('Preview limit: NIF must be at most 64 MiB')
-        r = Reader(path.read_bytes())
+        from security_io import read_bounded
+        try: payload = read_bounded(path, MAX_NIF_BYTES, 'Preview NIF')
+        except ValueError as exc: raise PreviewError(str(exc)) from exc
+        r = Reader(payload)
         newline = r.data.find(b'\n', 0, 256)
         if newline < 0 or not r.data.startswith(b'Gamebryo File Format, Version 20.2.0.7'):
             raise PreviewError('Expected Fallout 4 / Fallout 76 NIF 20.2.0.7')
@@ -124,6 +125,9 @@ def clean_reference(reference, category):
     if parts and parts[0].lower() == 'data': parts = parts[1:]
     if parts and parts[0].lower() == category.lower(): parts = parts[1:]
     if not parts: raise PreviewError('Empty resource reference')
+    from security_io import safe_relative
+    try: safe_relative('/'.join(parts))
+    except ValueError as exc: raise PreviewError(str(exc)) from exc
     return Path(category, *parts)
 
 class ResourceResolver:
@@ -132,15 +136,17 @@ class ResourceResolver:
         self.roots = []
         for label, value in (('converted', converted_root), ('source fallback', source_root)):
             if not value: continue
-            root = Path(value).resolve()
+            from security_io import assert_no_reparse
+            root = assert_no_reparse(value)
             # Accept the converter's run folder, its converted child, or Data root.
-            if (root / 'converted').is_dir(): root = (root / 'converted').resolve()
+            if (root / 'converted').is_dir(): root = assert_no_reparse(root / 'converted')
             if root.name.casefold() in ('materials', 'textures', 'meshes'): root = root.parent
             if root.is_dir() and root not in [r for _, r in self.roots]: self.roots.append((label, root))
     def resolve(self, reference, category):
         relative = clean_reference(reference, category)
         for label, root in self.roots:
-            candidate = (root / relative).resolve()
+            from security_io import assert_no_reparse
+            candidate = assert_no_reparse(root / relative)
             if not candidate.is_relative_to(root): raise PreviewError('Resource symlink escapes selected root')
             if candidate.is_file(): return candidate, label
         return None, 'missing'
@@ -206,7 +212,12 @@ def _load_preview_texture(path, cancel, max_side):
     width, height, offset, size = layout[level]
     if width * height > 16 * 1024 * 1024:
         raise PreviewError('Large DDS has no bounded preview mip')
-    with path.open('rb') as stream:
+    from security_io import open_read
+    with open_read(path) as stream:
+        import os
+        if os.fstat(stream.fileno()).st_size>MAX_TEXTURE_BYTES:raise PreviewError('DDS exceeds 128 MiB preview limit')
+        if dds.parse_dds_header(stream)!=info:raise PreviewError('DDS header changed before preview read')
+        stream.seek(0)
         header = bytearray(stream.read(info.data_offset))
         if len(header) != info.data_offset or struct.unpack_from('<I', header, 4)[0] != 124:
             raise PreviewError('Invalid DDS header')
@@ -234,7 +245,7 @@ def _load_preview_texture(path, cancel, max_side):
         struct.pack_into('<I', header, 128, {72:71,75:74,78:77,99:98,29:28,91:87}.get(code,code))
     check_cancel(cancel)
     # Pillow's native BC decoder avoids the Python per-block path.
-    with Image.open(io.BytesIO(bytes(header) + payload)) as image:
+    with Image.open(io.BytesIO(bytes(header) + payload), formats=['DDS']) as image:
         image.load()
         if max(image.size) > max_side: image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
         result = np.asarray(image.convert('RGBA'), dtype=np.uint8).copy()
@@ -324,7 +335,8 @@ def _shader_material(nif, index, resolver, cache, images, diagnostics, cancel):
 def load_scene(path, converted_root='', source_root='', cancel=None):
     """Parse geometry, apply scene transforms, and load resolved material maps."""
     check_cancel(cancel)
-    path = Path(path).resolve()
+    from security_io import assert_no_reparse
+    path = assert_no_reparse(path)
     if path.suffix.lower() != '.nif': raise PreviewError('Choose a local .nif file')
     nif = NifReader(path)
     resolver = ResourceResolver(converted_root, source_root)

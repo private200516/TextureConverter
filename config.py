@@ -178,7 +178,9 @@ class Config:
 
     @classmethod
     def from_json(cls, text: str) -> "Config":
-        data = json.loads(text)
+        from security_io import json_bounded
+        data = json_bounded(text)
+        if not isinstance(data, dict): raise ValueError('Configuration must be an object')
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         values = {k: v for k, v in data.items() if k in known}
         values['metal_options'] = processing_options(values.get('metal_options'))
@@ -207,8 +209,8 @@ def load_config() -> Config:
     p = config_path()
     if os.path.isfile(p):
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                return Config.from_json(f.read())
+            from security_io import read_bounded, MAX_JSON_BYTES
+            return Config.from_json(read_bounded(p, MAX_JSON_BYTES, 'Configuration').decode('utf-8-sig'))
         except Exception:  # noqa: BLE001 — 配置损坏时回退默认
             pass
     return Config()

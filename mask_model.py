@@ -1,13 +1,17 @@
 """Source-resolution edit/protection masks with bounded undo. No image resizing."""
 from __future__ import annotations
 import zlib
+import os
 import numpy as np
 from PIL import Image
+from security_io import open_read, png_header
 
 
 class MaskModel:
     def __init__(self, shape, candidate=None, undo_limit=64 * 1024 * 1024):
         self.shape = tuple(shape[:2])
+        if len(self.shape)!=2 or any(not isinstance(x,(int,np.integer)) or x<=0 for x in self.shape) or self.shape[0]*self.shape[1]>64*1024*1024:
+            raise ValueError('Mask dimensions exceed 64 megapixel budget')
         self.candidate = self._array(candidate) if candidate is not None else np.zeros(self.shape, np.uint8)
         self.layers = {'edit': self.candidate.copy(), 'protect': np.zeros(self.shape, np.uint8)}
         self.history = []
@@ -62,7 +66,13 @@ class MaskModel:
         else: raise ValueError(action)
 
     def load(self, layer, path):
-        with Image.open(path) as im:
+        with open_read(path) as stream:
+            if os.fstat(stream.fileno()).st_size>256*1024*1024:raise ValueError('Mask exceeds 256 MiB file budget')
+            png_header(stream,self.shape)
+            return self._load_png(layer,stream)
+
+    def _load_png(self, layer, stream):
+        with Image.open(stream,formats=['PNG']) as im:
             if im.format != 'PNG' or im.mode not in ('L', '1', 'I;16', 'I'):
                 raise ValueError('Import a grayscale PNG mask (not RGB/RGBA).')
             if (im.height, im.width) != self.shape:

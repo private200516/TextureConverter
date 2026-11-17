@@ -1,12 +1,21 @@
 {
   "schema_version": 1,
-  "revision": "pinterest-motion-20261117",
-  "baseline_manifest_sha256": "d70ebf00d248d35b94f97ecf075f84d97c878819316aaa02b2aee427f54971ac",
+  "revision": "security-hardening-20261117",
   "files": [
     {
       "relative": ".gitignore",
       "size": 326,
       "sha256": "16e45d285d178e800eabaf8cc98a5ed27f4b5d1584a4a346b63253b5c22a24c9"
+    },
+    {
+      "relative": "BUILDING.md",
+      "size": 1080,
+      "sha256": "b79f5d28c56f5946d48f90e0ad6322b267b4ac986d678481106451fe21ea9bee"
+    },
+    {
+      "relative": "BUILD_PROVENANCE.json",
+      "size": 95585,
+      "sha256": "60e6f4c932653e628ce73efcb792bd0523a5898e09bafe941137c88c82a9963f"
     },
     {
       "relative": "LICENSE",
@@ -25,8 +34,8 @@
     },
     {
       "relative": "README.md",
-      "size": 8283,
-      "sha256": "39b074ab36fd769130c826451267c43d6feb67f812386c2294864d92889b73ab"
+      "size": 8589,
+      "sha256": "5fa94658bb4ebb9d7fbdb00a04d9d59a3c27665ce4952c54304545abac768b32"
     },
     {
       "relative": "RELEASE_NOTES_20261117.md",
@@ -34,19 +43,39 @@
       "sha256": "735026ed46d449783d5f3820ccb2780d10af02e5c7c6b226cec7fab2d376adcf"
     },
     {
+      "relative": "SECURITY.md",
+      "size": 5913,
+      "sha256": "dd41ff65df78c1c4aa11aaa1aecfa9a51a0f474ebe030f5888ec81294834d2bd"
+    },
+    {
+      "relative": "SECURITY_HARDENING_20261117.md",
+      "size": 4817,
+      "sha256": "a887ba2ad87db1d0896c73287dafb82c60b813ee47c564ecb388df583ce13c80"
+    },
+    {
+      "relative": "SECURITY_REVISION_20261117.md",
+      "size": 3329,
+      "sha256": "94c9266b48b5918b96ce723e845284095a5f877894b4db90b660dd2e3e4a12bb"
+    },
+    {
+      "relative": "SECURITY_VALIDATION.json",
+      "size": 1109,
+      "sha256": "0375211eed611348e1eae7d70a1193f094b0f0e5ec814fa1f93746e56efb6b3c"
+    },
+    {
       "relative": "THIRD_PARTY_NOTICES.txt",
-      "size": 2368,
-      "sha256": "4fd3777999830ef6eebd15447cee86ec67112495bbb6f4655e196adc76797ef6"
+      "size": 2571,
+      "sha256": "9c9c1cb1dc6488757d976ab8934728eed84b93881914b858fb09a2ec20ef5475"
     },
     {
       "relative": "TextureLauncher.cs",
-      "size": 3212,
-      "sha256": "125e1c1e1e746b02763aa2e871a641290c3485ea9ab35a1923752ae395df3a9e"
+      "size": 13947,
+      "sha256": "e4b9377eeaf2bddf0b830aaa14c0e7f3c6c2365535c3554b77cd378a152f7cbd"
     },
     {
       "relative": "UPSTREAM_DEPENDENCIES.md",
-      "size": 3991,
-      "sha256": "983ea818027173ce91c99403008e3ab54e097ff5dd8b00140bf2a4c0a9f1f6da"
+      "size": 4384,
+      "sha256": "536bb52974ad145a51e4907510c02515e7cc1b21ea71132d9ccebb2089b3ea57"
     },
     {
       "relative": "VALIDATION_20261117.md",
@@ -140,8 +169,8 @@
     },
     {
       "relative": "config.py",
-      "size": 7275,
-      "sha256": "d0a480aeafc0304623068db6a6d53494499af323074cb408ec9ede6e50283b8f"
+      "size": 7480,
+      "sha256": "61b1c313daa1ac9d053b93da936e1ec1585662be337621c3c2b57e224015302a"
     },
     {
       "relative": "converter.py",
@@ -150,8 +179,8 @@
     },
     {
       "relative": "dds.py",
-      "size": 31765,
-      "sha256": "26569f66a4bbedd09f858ac29f07125aca366e7c6254793a5c8e8fe61b11701f"
+      "size": 34797,
+      "sha256": "861946fae40d235d55d01f80959f48c431a77ef8fdc8f34279415558ab9eff6a"
     },
     {
       "relative": "i18n.py",
@@ -190,23 +219,23 @@
     },
     {
       "relative": "mask_model.py",
-      "size": 3709,
-      "sha256": "df9a1175a9a99e35b001b3ddcff6270dc0b14963deab4aa0575cc09811d64170"
+      "size": 4291,
+      "sha256": "c2e99f3b72992fb05ea7d77fbd01aee1f4b3ff2ebcab5e1ad9b2fde84032cf3a"
     },
     {
       "relative": "material.py",
-      "size": 7950,
-      "sha256": "d0465b12709c597bb2236807a98f91fc4d222a5efbddaeafaed38d20326bd4c3"
+      "size": 7982,
+      "sha256": "4b99bc422e7037e17a21169cc7e5cdce86240852336500e08c0ef422479cb91a"
     },
     {
       "relative": "material_codec.py",
-      "size": 16709,
-      "sha256": "435f628e201a14ad926199ba28e171d486e8928f64f707cb5c18ba2dbd2990bb"
+      "size": 16764,
+      "sha256": "f95e0b076c3adce27e6eaa61cb6799e112bdba230c361bd935cacab925cb7a51"
     },
     {
       "relative": "material_converter.py",
-      "size": 4350,
-      "sha256": "b1be3817098300438c16710b291ee26c6a33b1726a874fd68dc3f9d2f4aa0179"
+      "size": 4409,
+      "sha256": "d89fb0664ffb8c135323a1d76938843fe19e26d3c58966ce909ca72011ab1c9d"
     },
     {
       "relative": "material_corpus.py",
@@ -215,8 +244,8 @@
     },
     {
       "relative": "material_jobs.py",
-      "size": 11597,
-      "sha256": "f55898d1aa72843dd166e93d9dd0b4f8317f1052944b71d3f4ec8d8dc47aaf9c"
+      "size": 13798,
+      "sha256": "15504346f502d7be01e72f86260ac7199af44e103694372a36a8a786ff73570b"
     },
     {
       "relative": "metal_reconstruction.py",
@@ -225,18 +254,18 @@
     },
     {
       "relative": "metal_ui.py",
-      "size": 27846,
-      "sha256": "55e68ea3089b34b2b0788812103c21c3ce0a9cd13019a26717dc26df6b165798"
+      "size": 28099,
+      "sha256": "7e147c56576ed426e9a64c870805526c6634534296313a2e96be4f3ff9236beb"
     },
     {
       "relative": "nif_preview.py",
-      "size": 27519,
-      "sha256": "9844d4c67ca23308905b9c1c7780bbc8f9bc9b1bc520f3c10a22db12d7e8152e"
+      "size": 27536,
+      "sha256": "b6a5ec86fc263e7984141627cf3b2e0080ad2050ba84259cfe9dff10832f2947"
     },
     {
       "relative": "nif_preview_data.py",
-      "size": 22026,
-      "sha256": "a99e23c933cf06bd158b76f1cd9ae21c272d2bf142173b51afbc757a40a370b1"
+      "size": 22727,
+      "sha256": "6f32af2a9fb1d33cdb8c7a68765237de1a722c3cd308bf98b81310ce075dba7f"
     },
     {
       "relative": "options_policy.py",
@@ -244,9 +273,19 @@
       "sha256": "f2f013444e98b398fd6007e021a076a7727a639c5f9a9ce1dcba2eaaa1d1dba4"
     },
     {
+      "relative": "preview_process.py",
+      "size": 12863,
+      "sha256": "4b1c8d4b73cbb936744ccb9539d45ca834b9d132c6c399b679708f975415cf92"
+    },
+    {
+      "relative": "preview_worker.py",
+      "size": 1618,
+      "sha256": "6154e41d1395daa5a9315d1e07b0255953fca58b8a3f8556cf4cdd6281b8f552"
+    },
+    {
       "relative": "requirements.txt",
-      "size": 72,
-      "sha256": "692cd3454ca88e9cbb38a166bcedfd51c59bd6c13af46aacd90b96a90bdba63a"
+      "size": 77,
+      "sha256": "3a6033b2aaff9bae4def6ccc72efc3f0b4cac9aa9811fb4accccc2eb6e03d015"
     },
     {
       "relative": "scanner.py",
@@ -254,9 +293,14 @@
       "sha256": "248b0604cc386a66423bee1074724418bd39a2d0f1fb163c34df4a52b7731509"
     },
     {
+      "relative": "security_io.py",
+      "size": 7649,
+      "sha256": "7e8a8fbfd5412fe2297d7fa899e80fdb49f4e9aba0f8272defe449f892aebd3b"
+    },
+    {
       "relative": "semantic_dds.py",
-      "size": 12816,
-      "sha256": "66307d3d80e88089ce25385e9730dbf1c520c70153db64308860f43399cd7337"
+      "size": 13418,
+      "sha256": "eb635985c3f73ef2021385c61ee6648566466090bc2310716e3c685df64f128e"
     },
     {
       "relative": "templates/default.bgem",
@@ -309,6 +353,11 @@
       "sha256": "48fdcc2e4e6463387f92b06cad7c69de898b2caf49aa34d1f929e83270cce985"
     },
     {
+      "relative": "tests/test_launcher_security.py",
+      "size": 12122,
+      "sha256": "b974635d98d882b13e9797952d3228d03e65320697dbdd358a2f4c249d62367b"
+    },
+    {
       "relative": "tests/test_main_preview.py",
       "size": 4572,
       "sha256": "39e6a86e365422a7862c55bf54ed1a4d9e447597bce833fd39b63513deb7b663"
@@ -340,8 +389,8 @@
     },
     {
       "relative": "tests/test_metal_ui.py",
-      "size": 3751,
-      "sha256": "7733964c8d53f869ab6b7917517c06af83fdbee4cef6a9cf8d4586f57c531d2d"
+      "size": 4475,
+      "sha256": "3c01584b0bc31d9fee603d20586a3f01410466609fc2423b8f16b309ed471d9e"
     },
     {
       "relative": "tests/test_motion_integration.py",
@@ -364,9 +413,19 @@
       "sha256": "0c41806d90ab5e4726043f672257a62f18e90014e7ebafb0d4b81ebd7067b785"
     },
     {
+      "relative": "tests/test_scan_limits.py",
+      "size": 6785,
+      "sha256": "9b16a8ff7374084488cfcf8856d9fb70b3ad7d4bbc3b7c5c56dec5af961fbc3a"
+    },
+    {
       "relative": "tests/test_security_boundaries.py",
-      "size": 6989,
-      "sha256": "2127ffa54558fce1a2847ad72ba9fdbbd52544aa11822df63802a7d340d5b5db"
+      "size": 7312,
+      "sha256": "2b3127d25de618192b22f91681f78503b1b77423cdbde541beaeb968c82a040c"
+    },
+    {
+      "relative": "tests/test_security_hardening.py",
+      "size": 17606,
+      "sha256": "bc27c67b69bbc69595113f50553025d1a17309355ebde27b423c4253ed534674"
     },
     {
       "relative": "tests/test_ui_dispatch.py",
@@ -380,13 +439,18 @@
     },
     {
       "relative": "texture_api.py",
-      "size": 39629,
-      "sha256": "29eaf976295bcb3eebc5535c5787bdd30169d6f06c446bff1a9e2f67b98d2dac"
+      "size": 42108,
+      "sha256": "33fe9d91c421f35ab580eaed37ae3aacc3cdc146437141df40d27e5b6d16f36d"
     },
     {
       "relative": "texture_cli.py",
-      "size": 2127,
-      "sha256": "a1e15789c4c8a95ca02f19dd982be99d00729d8d5f5234d5769ab14a7e5d671b"
+      "size": 2210,
+      "sha256": "964e46acae7d01573a92e24e70f81c7a52a4f24e86b3158f1f05868d42149948"
+    },
+    {
+      "relative": "tools/build_launcher.ps1",
+      "size": 1091,
+      "sha256": "33fcf6f428764883b3927176db7f0985e2fd3d6f7bc5b2c02c8f207c3c5cab0a"
     },
     {
       "relative": "tools/gen_icon.py",

@@ -34,12 +34,17 @@ class Work(QThread):
     def __init__(self, fn, parent=None): super().__init__(parent); self.fn = fn
     def run(self):
         try: self.done.emit(self.fn())
+        except InterruptedError: pass
         except Exception: self.failed.emit(traceback.format_exc())
 
 
 def thumbnail(array, side=900):
     if isinstance(array, (str, Path)):
-        with Image.open(array) as im: a = im.convert('RGBA').copy()
+        from security_io import open_read, png_header
+        with open_read(array) as stream:
+            png_header(stream)
+            with Image.open(stream,formats=['PNG']) as im:
+                a = im.convert('RGBA').copy()
     else:
         data = np.asarray(array)
         if data.dtype != np.uint8: data = np.rint(np.clip(data, 0, 1)*255).astype(np.uint8)
@@ -286,8 +291,8 @@ class MetalDialog(QDialog):
             opts['manual_mask']=self.model.layers['edit'].copy()/255.; opts['protect_mask']=self.model.layers['protect'].copy()/255.
         self.status.setText(t('后台计算预览；输入文件保持只读…','Computing preview in background; inputs remain read-only…'))
         def work():
-            from texture_api import preview_job
-            result=preview_job(job,opts)
+            from preview_process import preview_job_isolated
+            result=preview_job_isolated(job,opts,cancel=self.cancel_event)
             result['thumbnails']={k:thumbnail(v) for k,v in result.get('views',{}).items()}
             result.pop('views',None)
             result['_preview_job_id']=job_id(job)
