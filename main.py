@@ -30,7 +30,7 @@ from i18n import tr
 from logger import ConversionLog
 from material_jobs import scan_jobs
 from ui_events import UiEventBuffer
-from app_motion import MotionController
+from app_motion import MotionController, ContentReveal
 from ui_widgets import (BannerWidget, LiveLogWidget,
                         PillSelector, ProcessPanel,
                         StatusBarWidget, SweepButton)
@@ -79,7 +79,9 @@ class TextDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(680, 540)
-        lay = QVBoxLayout(self)
+        root=QVBoxLayout(self);root.setContentsMargins(0,0,0,0)
+        self.content=QWidget(self);root.addWidget(self.content)
+        lay = QVBoxLayout(self.content)
         head = QLabel(title)
         head.setStyleSheet(
             f"font-family:{T.FONT_DISPLAY}; font-size:16px; padding:6px 2px;")
@@ -91,6 +93,24 @@ class TextDialog(QDialog):
         btns.rejected.connect(self.reject)
         btns.accepted.connect(self.accept)
         lay.addWidget(btns)
+        self.reveal=ContentReveal(self,kind='dialog')
+        self._finishing_done=False;self._closing_result=None
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        self._finishing_done=False;self._closing_result=None
+        self.reveal.reveal(self.content)
+
+    def done(self,result):
+        if self._finishing_done or not self.isVisible():
+            super().done(result);return
+        if self._closing_result is not None:return
+        self._closing_result=result
+        self.reveal.collapse(self.content,lambda:self._complete_done(result))
+
+    def _complete_done(self,result):
+        self._finishing_done=True
+        super().done(result)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +132,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(T.app_stylesheet(i18n.LANG))
         self.worker: ConvertWorker | None = None
         self.scanner: ScanWorker | None = None
+        self._active_task = None
         self.icon_pm = icon_pm
         self.icon_key = icon_key
 
@@ -126,6 +147,10 @@ class MainWindow(QMainWindow):
         self._event_timer=QTimer(self,interval=100,timeout=self._drain_worker_events)
         self.motion=MotionController(self,self.centralWidget(),title='TEXTURE CONVERTER',author=APP_AUTHOR)
         self.motion.startup_finished.connect(self._startup_complete)
+        self.motion.shutdown_failed.connect(self._shutdown_failed)
+        self.navigation_motion=ContentReveal(self,enabled=lambda: not self.motion.reduced_motion and self.motion.state in ('new','ready'))
+        self.tabs.currentChanged.connect(self._reveal_tab)
+        self.advanced.currentChanged.connect(self._reveal_advanced)
         self._close_pending = False
         self._last_output = None
 
@@ -183,7 +208,7 @@ class MainWindow(QMainWindow):
         bl.setSpacing(12)
         root.addWidget(body, 4)
 
-        # ---------- 页签（直接切换，避免叠加动画） ----------
+        # ---------- 页签（短快照过渡，不对整棵控件树应用透明特效） ----------
         tabs = QTabWidget()
         self.tabs = tabs
         bl.addWidget(tabs, 1)
@@ -519,6 +544,14 @@ class MainWindow(QMainWindow):
         for widget in (self.logview,self.proc_panel,self.statusbar):widget.setVisible(not preview)
         if preview:self._ensure_preview()
 
+    def _reveal_tab(self,index):
+        previous=getattr(self,'_motion_tab_index',0);self._motion_tab_index=index
+        self.navigation_motion.reveal(self.tabs.currentWidget(),1 if index>=previous else -1)
+
+    def _reveal_advanced(self,index):
+        previous=getattr(self,'_motion_advanced_index',0);self._motion_advanced_index=index
+        self.navigation_motion.reveal(self.advanced.currentWidget(),1 if index>=previous else -1)
+
     def open_model_preview(self):
         self.tabs.setCurrentIndex(self.preview_tab_index)
 
@@ -528,6 +561,10 @@ class MainWindow(QMainWindow):
     def _startup_complete(self):
         if self._show_first_run_about and not self._close_pending:
             QTimer.singleShot(80,self.maybe_about)
+
+    def _shutdown_failed(self,message):
+        self._close_pending=False
+        self.scan_summary.setText(t('无法关闭窗口，已恢复界面：','Could not close the window; workspace restored: ')+message)
 
     def _invalidate_scan(self,*_):
         self._prepared_jobs=None;self._scan_context=None
@@ -646,7 +683,9 @@ class MainWindow(QMainWindow):
         self.run_metrics.show();self.run_metrics.setText(t("准备任务…","Preparing…"))
         self.tabs.setEnabled(False);self.btn_cancel.setEnabled(True)
         self.btn_start.setEnabled(False);self.btn_analyze.setEnabled(False)
-        self.statusbar.set_state(stage);self.proc_panel.set_stage(stage)
+        self.statusbar.set_progress_info(0,0)
+        self.proc_panel.reset();self.proc_panel.set_stage(stage)
+        self.statusbar.set_state(stage);self.banner.set_count(0,0)
         self.banner.set_running(True);self.logview.set_running(True)
         self._event_timer.start()
 
@@ -657,6 +696,7 @@ class MainWindow(QMainWindow):
         self._begin_task("scanning")
         self.logview.append_system(tr("sys_scan"))
         self.scanner=ScanWorker(cfg.input_dir)
+        self._active_task=self.scanner
         self.scanner.done.connect(self._scanned)
         self.scanner.failed.connect(self._on_failed)
         self.scanner.finished.connect(self._re_enable)
@@ -683,18 +723,21 @@ class MainWindow(QMainWindow):
         self.logview.clear_log();self.banner.set_count(0,0)
         self._begin_task("running");self.logview.append_system(tr("sys_start"))
         self.worker=ConvertWorker(cfg,jobs=self._prepared_jobs,scan_context=self._scan_context)
+        self._active_task=self.worker
         self.worker.done.connect(self._on_convert_done)
         self.worker.failed.connect(self._on_failed)
         self.worker.finished.connect(self._re_enable)
         self.worker.start()
 
     def _drain_worker_events(self,final=False):
-        for worker in (self.scanner,self.worker):
-            if worker is None:continue
+        worker=self._active_task
+        if worker is not None:
             update=worker.events.drain(512 if final else 80)
+            entries=[]
             if update['omitted']:
-                self.logview.append_system(t(f"高频日志已合并 {update['omitted']:,} 条；完整内容见任务报告。",f"Coalesced {update['omitted']:,} display entries; complete records are in the task report."))
-            if update['logs']:self.logview.append_entries(update['logs'])
+                entries.append(('INFO',t(f"高频日志已合并 {update['omitted']:,} 条；完整内容见任务报告。",f"Coalesced {update['omitted']:,} display entries; complete records are in the task report."),''))
+            entries.extend(update['logs'])
+            if entries:self.logview.append_entries(entries)
             if update['progress']:self._on_progress(*update['progress'])
             if worker is self.worker:self.proc_panel.set_counters(update['warnings'],update['errors'])
 
@@ -710,7 +753,7 @@ class MainWindow(QMainWindow):
         self.statusbar.set_progress_info(done, total)
         self.proc_panel.set_progress(done, total, name)
         self.banner.set_count(done, total)
-        if self.worker:
+        if self._active_task is self.worker and self.worker is not None:
             self.proc_panel.set_counters(self.worker.warning_count,
                                          self.worker.error_count)
 
@@ -784,17 +827,19 @@ class MainWindow(QMainWindow):
         self.cfg.about_seen=True; cfgmod.save_config(self.cfg)
 
     def maybe_about(self):
-        if self._show_first_run_about and self.motion.state=='ready' and self.isVisible() and not self._close_pending and not self.cfg.about_seen:self.show_about()
+        if self._show_first_run_about and self.motion.state=='ready' and self.isVisible() and not self.isMinimized() and not self._close_pending and not self.cfg.about_seen:self.show_about()
 
     # ================= Single-window transition =================
     def closeEvent(self,e):
         if self._busy():
             self._close_pending=True;self.cancel_work();e.ignore();return
         if getattr(self,"_closing",False) or self.motion.closed:
+            self.navigation_motion.cancel()
             self._event_timer.stop();self._icon_timer.stop()
             if self._preview is not None:self._preview.shutdown()
             e.accept();return
         self._collect();e.ignore();self._show_first_run_about=False
+        self.navigation_motion.cancel()
         self.motion.shutdown(lambda: QTimer.singleShot(0,self.close))
 
 

@@ -1,5 +1,7 @@
 {
   "schema_version": 1,
+  "revision": "pinterest-motion-20261117",
+  "baseline_manifest_sha256": "d70ebf00d248d35b94f97ecf075f84d97c878819316aaa02b2aee427f54971ac",
   "files": [
     {
       "relative": ".gitignore",
@@ -12,9 +14,24 @@
       "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
     },
     {
+      "relative": "MOTION_REVISION_20261117.md",
+      "size": 2802,
+      "sha256": "8c52c3a26196d84be002b6b0a842524d8f221fe6456331446fa0edb53838a40c"
+    },
+    {
+      "relative": "MOTION_SPEC_20261117.md",
+      "size": 4933,
+      "sha256": "1b5500117c91355a41c1b8fa84ddd6dd7890dfc2b61bded908e88347a1d47a07"
+    },
+    {
       "relative": "README.md",
-      "size": 7636,
-      "sha256": "7a4565f1ceb9cb4d6337fcf0500cb647331986f2a69c3e062c93640f001a6bad"
+      "size": 8283,
+      "sha256": "39b074ab36fd769130c826451267c43d6feb67f812386c2294864d92889b73ab"
+    },
+    {
+      "relative": "RELEASE_NOTES_20261117.md",
+      "size": 1004,
+      "sha256": "735026ed46d449783d5f3820ccb2780d10af02e5c7c6b226cec7fab2d376adcf"
     },
     {
       "relative": "THIRD_PARTY_NOTICES.txt",
@@ -32,9 +49,14 @@
       "sha256": "983ea818027173ce91c99403008e3ab54e097ff5dd8b00140bf2a4c0a9f1f6da"
     },
     {
+      "relative": "VALIDATION_20261117.md",
+      "size": 2174,
+      "sha256": "411f7d908e7c763bd16a597ea7813d00874edc7f056d54ba8406b91a7009d1f4"
+    },
+    {
       "relative": "app_motion.py",
-      "size": 9463,
-      "sha256": "396bbf02ac7d3b2ef4aeb1cb3eca90200d0fa4d9ee9c2768aa8d17dab16f007f"
+      "size": 17600,
+      "sha256": "b6bfd226c5ca977e15e9ba0d5e42c204487341b5da81f9e7adcdf50597a64b93"
     },
     {
       "relative": "assets/fonts/Aquire-Bold.otf",
@@ -163,8 +185,8 @@
     },
     {
       "relative": "main.py",
-      "size": 40577,
-      "sha256": "bccf62db0d5c46b1ccf74590f2a2fbaf38716725d3b072436b3b578b5759fbba"
+      "size": 42858,
+      "sha256": "9293343ad6206e11a4f16849ad270a38d6d8bc9a69ecdc4d836efabcc83b24cd"
     },
     {
       "relative": "mask_model.py",
@@ -247,14 +269,19 @@
       "sha256": "ce3911ce2840170ce1389a2243a6de2b801228e59b6495cb3d2b1b48f58fbeb0"
     },
     {
+      "relative": "tests/qt_smoke.py",
+      "size": 9093,
+      "sha256": "c44e648803d57745a753564291d666649387219389fc52aa08a1c53a1e33d755"
+    },
+    {
       "relative": "tests/test_app_motion.py",
-      "size": 9056,
-      "sha256": "dc5d571f239dd73b6a61a93282db3d3027ea096875502da50db751c7087c9c28"
+      "size": 15809,
+      "sha256": "17df46a96d4ecf131f2f1e642e1649b402c8689d6dff2a1cdb209b1a30d15f68"
     },
     {
       "relative": "tests/test_batch_performance.py",
-      "size": 5920,
-      "sha256": "3c762d0f526a18222cb4a59d31fd25e869433ad0352101463cf3eb35719ea7d8"
+      "size": 5958,
+      "sha256": "2806b268e0eaed982dbc9f762b59482daaeaa7ba774ba90249f1a48c03f63e67"
     },
     {
       "relative": "tests/test_cancellation.py",
@@ -318,8 +345,8 @@
     },
     {
       "relative": "tests/test_motion_integration.py",
-      "size": 4152,
-      "sha256": "8ea4fc2ca7c1fe841dc335d62811374f63e430fbbd1e5c6eff32d49a7d5dd569"
+      "size": 9433,
+      "sha256": "4dddc6c9a2237f61830ccdddb5514e843e82bdfe2183b2b7301bce1ad3e47fab"
     },
     {
       "relative": "tests/test_nif_preview.py",
@@ -393,14 +420,13 @@
     },
     {
       "relative": "ui_theme.py",
-      "size": 11365,
-      "sha256": "ac70604d9744752577c4804328c64ca98926f05d05566c1febdc8fb71a0f44d3"
+      "size": 11491,
+      "sha256": "3a9a1a2e765b97094b975e9b454a9c8abfa6d2ccf6d4fdd1345007506f39d6da"
     },
     {
       "relative": "ui_widgets.py",
-      "size": 38662,
-      "sha256": "19a6004b29ed8598cec3360ce1e71a5599e67a4026e0600cb982f3c81c3a8a24"
+      "size": 43111,
+      "sha256": "a43e1a8383bbf06ff2018c325354bb7c008e099e28409a14f911b843a6f03dd8"
     }
-  ],
-  "self_excluded": "SOURCE_MANIFEST.json"
+  ]
 }

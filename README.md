@@ -1,12 +1,16 @@
 # TextureConverter · ALPHA 1.0
 
+> **最新动效版本 / Latest motion revision:** 2026-11-17 Pinterest motion. 启动 1400ms、关闭 650ms；323 项回归通过。详见 [MOTION_REVISION_20261117.md](MOTION_REVISION_20261117.md)。
+
+> 历史记录：较早的 runtime-motion 更新共通过 315 项测试，保留在 [VALIDATION_20261117.md](VALIDATION_20261117.md) 供追溯；当前版本采用上方的 323 项验证。下文“本次整理／未运行”等陈述属于 10 月源码发布阶段的历史说明。
+
 本地 BGSM/BGEM 材质转换与受支持的 DDS 适配工具。项目代码采用 GPL-3.0；作者为 private0516。原项目使用 GPT-6 Astra 辅助开发，代码与界面包含 AI 生成内容。本项目不代表 Bethesda、OpenAI 或依赖项目背书。
 
 这是完整的源代码开发包，包含原包字体、图标、经核对的 `tools/texconv.exe` 及其 MIT 通知；字体与图标的公开发布已获用户明确授权，资源按原始字节保留。不含预编译产品 EXE、Python runtime、安装后的 vendor 依赖或用户游戏样本。随包编码器的身份不等于本次重新运行或验证了原生 DDS 编码。
 
 ## Windows 下载
 
-[TextureConverter.zip](downloads/TextureConverter.zip) · [SHA256 校验文件](downloads/TextureConverter.zip.sha256)
+[TextureConverter.zip](https://github.com/private200516/TextureConverter/raw/refs/heads/main/downloads/TextureConverter.zip) · [SHA256 校验文件](downloads/TextureConverter.zip.sha256)
 
 下载后先核对 ZIP 的 SHA256，再完整解压，并保留包内配套目录。Windows 分发包与源码开发包分别审核，文件布局以下载包内说明为准；下文的源码环境说明不描述 ZIP 内的组件。
 

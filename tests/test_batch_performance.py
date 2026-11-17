@@ -67,6 +67,7 @@ class BatchPerformanceTests(unittest.TestCase):
         self.assertTrue(report['cancelled']);self.assertEqual(report['processed'],0);self.assertTrue((Path(log.output_dir)/'PARTIAL').is_file())
     def test_bad_mask_isolated_to_single_job(self):
         template=scan_jobs(self.source)[0];jobs=[dict(template,id='bad'),dict(template,id='good')]
+        self.cfg.metal_mode='manual'
         self.cfg.job_overrides={'bad':{'edit_mask_path':str(self.base/'missing.png')}}
         with patch('texture_api.run_job',side_effect=self.fake):log=run_jobs(jobs,self.cfg)
         self.assertEqual(log.errors,1);self.assertEqual(log.ok,1)

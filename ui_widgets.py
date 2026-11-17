@@ -22,7 +22,7 @@ from PySide6.QtCore import (QEasingCurve, QPropertyAnimation, Qt, QTimer,
                             QVariantAnimation, QRectF, QPointF, Signal, QEvent)
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient,
                            QPainter, QPainterPath, QPen)
-from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QWidget
 
 import ui_theme as T
 from i18n import tr
@@ -77,6 +77,8 @@ class _MotionWidget(QWidget):
         self._motion_suspended = False
         self._reduced_motion = reduced_motion_requested()
         self._observed_window = None
+        self._frame_time = time.monotonic()
+        self._inactive = False
 
     def set_motion_suspended(self, suspended):
         self._motion_suspended = bool(suspended)
@@ -93,13 +95,28 @@ class _MotionWidget(QWidget):
         pass
 
     def _sync_motion(self):
+        modal=QApplication.activeModalWidget()
+        paused = (self._reduced_motion or self._motion_suspended
+                  or self._inactive or not self.isVisible() or self.window().isMinimized()
+                  or (modal is not None and modal is not self.window()))
+        animation = getattr(self, '_anim', None)
+        if paused and animation is not None:
+            animation.stop()
+            self._settle_motion()
         timer = getattr(self, '_timer', None)
         if timer is None: return
         if self._reduced_motion: self._settle_motion()
-        active = (not self._reduced_motion and not self._motion_suspended
-                  and self.isVisible() and not self.window().isMinimized() and self._needs_motion())
-        if active and not timer.isActive(): timer.start()
+        active = not paused and self._needs_motion()
+        if active and not timer.isActive():
+            self._frame_time = time.monotonic()
+            timer.start()
         elif not active: timer.stop()
+
+    def _frame_delta(self):
+        now = time.monotonic()
+        delta = min(.064, max(0., now-self._frame_time))
+        self._frame_time = now
+        return delta
 
     def update(self, *args):
         self._sync_motion()
@@ -115,11 +132,15 @@ class _MotionWidget(QWidget):
         self._sync_motion()
 
     def hideEvent(self, event):
-        if getattr(self, '_timer', None) is not None: self._timer.stop()
+        timer=getattr(self,'_timer',None)
+        if timer is not None:timer.stop()
+        self._sync_motion()
         super().hideEvent(event)
 
     def eventFilter(self, obj, event):
-        if event.type() in (QEvent.WindowStateChange, QEvent.Show): self._sync_motion()
+        if event.type()==QEvent.WindowDeactivate:self._inactive=True
+        elif event.type()==QEvent.WindowActivate:self._inactive=False
+        if event.type() in (QEvent.WindowStateChange,QEvent.WindowActivate,QEvent.WindowDeactivate,QEvent.Show,QEvent.Hide):self._sync_motion()
         return False
 
 
@@ -143,7 +164,8 @@ class BannerWidget(_MotionWidget):
         self._count_from = 0.0
         self._count_started = 0.0
         self._total = 0
-        self._timer = QTimer(self, interval=33, timeout=self._tick)
+        self._timer = QTimer(self, interval=T.MOTION_FRAME_MS, timeout=self._tick)
+        self._timer.setTimerType(Qt.PreciseTimer)
 
     # -- 图标（支持热重载）------------------------------------------------
 
@@ -165,10 +187,6 @@ class BannerWidget(_MotionWidget):
         self.update()
 
     def _tick(self):
-        self._phase = (self._phase + self._speed * 0.033) % 1.0
-        self._pulse = (self._pulse + 0.033) % 1.0
-        if self._icon_spin > 0:
-            self._icon_spin = max(0.0, self._icon_spin - 0.033 / 0.6)
         t = min(1., max(0., (time.monotonic()-self._count_started)/.24))
         self._count_disp = self._count_from + (self._count_target-self._count_from)*(1-(1-t)**3)
         if t >= 1.: self._count_disp = float(self._count_target)
@@ -267,7 +285,8 @@ class StripedProgressBar(_MotionWidget):
         self._phase = 0.0
         self._running = False
         self._flash = 0.0            # 完成脉冲
-        self._timer = QTimer(self, interval=33, timeout=self._tick)
+        self._timer = QTimer(self, interval=T.MOTION_FRAME_MS, timeout=self._tick)
+        self._timer.setTimerType(Qt.PreciseTimer)
 
     def set_progress(self, fraction: float, running: bool = True):
         target = max(0.0, min(1.0, fraction))
@@ -293,13 +312,14 @@ class StripedProgressBar(_MotionWidget):
         self.update()
 
     def _tick(self):
+        delta = self._frame_delta()
         t = min(1., max(0., (time.monotonic()-self._changed_at)/.24))
         self._value = self._from_value + (self._target-self._from_value)*(1-(1-t)**3)
         if t >= 1.: self._value=self._target
         speed = 1.6 if self._running else 0.25
-        self._phase = (self._phase + speed * 0.033) % 1.0
+        self._phase = (self._phase + speed * delta) % 1.0
         if self._flash > 0:
-            self._flash = max(0.0, self._flash - 0.02)
+            self._flash = max(0.0, self._flash - delta/.6)
         self.update()
 
     def paintEvent(self, _e):
@@ -382,7 +402,8 @@ class StatusBarWidget(_MotionWidget):
         self._done = 0
         self._btns: list = []
         self._dock_left: float | None = None
-        self._timer = QTimer(self, interval=33, timeout=self._tick)
+        self._timer = QTimer(self, interval=T.MOTION_FRAME_MS, timeout=self._tick)
+        self._timer.setTimerType(Qt.PreciseTimer)
 
     # ---- 右侧按钮挂载（覆盖在条纹装饰区上） ----
 
@@ -427,9 +448,10 @@ class StatusBarWidget(_MotionWidget):
         self.update()
 
     def _tick(self):
+        delta = self._frame_delta()
         speed = 2.2 if self._running else 0.4
-        self._phase = (self._phase + speed * 0.033) % 1.0
-        self._pulse = (self._pulse + 0.033) % 1.0
+        self._phase = (self._phase + speed * delta) % 1.0
+        self._pulse = (self._pulse + delta) % 1.0
         if self._running or self._state in ("done",):
             self.update()
 
@@ -496,6 +518,10 @@ class ProcessPanel(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._state='idle'; self._done=0; self._total=0; self._warn=0; self._err=0; self._file=''
 
+    def reset(self):
+        self._state='idle';self._done=self._total=self._warn=self._err=0;self._file=''
+        self.update()
+
     def set_stage(self, state):
         if state == self._state: return
         self._state=state
@@ -504,12 +530,15 @@ class ProcessPanel(QWidget):
         self.update()
 
     def set_progress(self, done, total, name=''):
-        self._done,self._total=max(0,int(done)),max(0,int(total))
-        if name: self._file=name
+        values=max(0,int(done)),max(0,int(total)),name or self._file
+        if values == (self._done,self._total,self._file):return
+        self._done,self._total,self._file=values
         self.update()
 
     def set_counters(self, warn, err):
-        self._warn,self._err=max(0,int(warn)),max(0,int(err)); self.update()
+        values=max(0,int(warn)),max(0,int(err))
+        if values == (self._warn,self._err):return
+        self._warn,self._err=values; self.update()
 
     def paintEvent(self, event):
         p=QPainter(self); p.setRenderHint(QPainter.Antialiasing)
@@ -539,7 +568,8 @@ class LiveLogWidget(_MotionWidget):
     """Bounded live queue, batch append, and user-controlled bottom following."""
     MAX_ENTRIES=2000
     LINE_H=22
-    ARRIVAL_SECONDS=.18
+    ARRIVAL_SECONDS=.24
+    ANIMATED_ROWS=4
     LEVEL_COLORS={'OK':QColor(T.GREEN_OK),'GENERATED':QColor(T.RED),'COPIED':QColor(T.PAPER_DIM),
                   'WARNING':QColor(T.AMBER),'ERROR':QColor(T.RED_DARK),'SKIPPED':QColor(T.INK_SOFT),'INFO':QColor(T.PAPER_DIM)}
 
@@ -549,7 +579,8 @@ class LiveLogWidget(_MotionWidget):
         self.setMinimumHeight(140)
         self._entries=collections.deque(maxlen=self.MAX_ENTRIES)
         self._scroll=0; self._running=False; self._total_entries=0
-        self._timer=QTimer(self,interval=33,timeout=self._tick)
+        self._timer=QTimer(self,interval=T.MOTION_FRAME_MS,timeout=self._tick)
+        self._timer.setTimerType(Qt.PreciseTimer)
 
     def append_entries(self, entries):
         now=time.monotonic(); count=0
@@ -599,8 +630,9 @@ class LiveLogWidget(_MotionWidget):
         fm=QFontMetrics(text_font); fm_tag=QFontMetrics(tag_font)
         for i,(level,text,appeared) in enumerate(rows):
             age=max(0.,now-appeared)
-            alpha=1. if self._reduced_motion or self._scroll else min(1.,age/self.ARRIVAL_SECONDS)
-            ease=1.-(1.-alpha)**3; y=36+i*self.LINE_H+(1-ease)*6
+            alpha=1. if self._reduced_motion or self._scroll or start+i<len(self._entries)-self.ANIMATED_ROWS else min(1.,age/self.ARRIVAL_SECONDS)
+            ease=1.-(1.-alpha)**3; y=36+i*self.LINE_H+(1-ease)*8
+            p.save();p.setClipRect(QRectF(0,36+i*self.LINE_H,w,self.LINE_H+1))
             p.setOpacity(ease)
             color=self.LEVEL_COLORS.get(level,QColor(T.PAPER_DIM))
             tag=f'[{level}]'; tw=fm_tag.horizontalAdvance(tag)+14
@@ -610,6 +642,7 @@ class LiveLogWidget(_MotionWidget):
             x=chip.right()+12; width=max(0,w-x-16)
             p.setFont(text_font); p.setPen(QColor(T.PAPER_DIM if level not in ('ERROR','WARNING') else T.WHITE))
             p.drawText(QRectF(x,y,width,self.LINE_H),Qt.AlignVCenter|Qt.AlignLeft,fm.elidedText(text,Qt.ElideMiddle,int(width)))
+            p.restore()
         p.setOpacity(1.)
         if not self._entries:
             p.setFont(text_font); p.setPen(QColor(T.INK_SOFT))
@@ -623,7 +656,7 @@ class LiveLogWidget(_MotionWidget):
         p.end()
 
 
-class PillSelector(QWidget):
+class PillSelector(_MotionWidget):
     """
     胶囊单选器（对应参考图的 S/M/L 药丸）：
     红色选中胶囊在选项间滑动（260ms OutCubic），点击切换。
@@ -634,14 +667,16 @@ class PillSelector(QWidget):
         super().__init__(parent)
         self._keys = [k for k, _ in options]
         self._labels = [lb for _, lb in options]
+        self._cached_widths = None
         self._index = 0
         self._pos = 0.0                 # 胶囊动画位置（浮点索引）
         self._tooltips: dict[str, str] = {}
         self.setMinimumHeight(40)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._anim = QVariantAnimation(self)
-        self._anim.setDuration(260)
+        self._anim.setDuration(T.MOTION_CONTROL_MS)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._on_anim)
 
@@ -657,7 +692,7 @@ class PillSelector(QWidget):
         if idx == self._index:
             return
         self._index = idx
-        if animate and self.isVisible() and not reduced_motion_requested():
+        if animate and self.isVisible() and not self._reduced_motion and not self._motion_suspended:
             self._anim.stop()
             self._anim.setStartValue(self._pos)
             self._anim.setEndValue(float(idx))
@@ -676,6 +711,7 @@ class PillSelector(QWidget):
         if len(labels) != len(self._keys):
             return
         self._labels = list(labels)
+        self._cached_widths=None
         self.updateGeometry()
         self.update()
 
@@ -683,11 +719,16 @@ class PillSelector(QWidget):
         self._pos = float(v)
         self.update()
 
+    def _settle_motion(self):
+        self._pos = float(self._index)
+
     # ---- 几何 ----
 
     def _pill_widths(self) -> list[float]:
-        fm = QFontMetrics(_ui_font(12, QFont.Bold))
-        return [fm.horizontalAdvance(lb) + 36 for lb in self._labels]
+        if self._cached_widths is None:
+            fm=QFontMetrics(_ui_font(12,QFont.Bold))
+            self._cached_widths=[fm.horizontalAdvance(lb)+36 for lb in self._labels]
+        return self._cached_widths
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
@@ -715,6 +756,9 @@ class PillSelector(QWidget):
     # ---- 交互 ----
 
     def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return super().mousePressEvent(e)
+        self.setFocus(Qt.MouseFocusReason)
         x = e.position().x()
         widths = self._pill_widths()
         acc = 4.0
@@ -727,6 +771,13 @@ class PillSelector(QWidget):
                 break
             acc += pw
         super().mousePressEvent(e)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End):
+            index = (0 if event.key() == Qt.Key_Home else len(self._keys)-1 if event.key() == Qt.Key_End
+                     else max(0,min(len(self._keys)-1,self._index + (-1 if event.key() == Qt.Key_Left else 1))))
+            self.set_key(self._keys[index]);event.accept();return
+        super().keyPressEvent(event)
 
     # ---- 绘制 ----
 
@@ -752,6 +803,9 @@ class PillSelector(QWidget):
             p.setFont(_ui_font(12, QFont.Bold if active else QFont.DemiBold))
             p.setPen(QColor(T.WHITE) if active else QColor(T.INK))
             p.drawText(r, Qt.AlignCenter, lb)
+        if self.hasFocus():
+            p.setBrush(Qt.NoBrush);p.setPen(QPen(QColor(T.INK_SOFT),1,Qt.DotLine))
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),h/2-1,h/2-1)
         p.end()
 
 
@@ -803,7 +857,8 @@ class MarqueeWidget(_MotionWidget):
         self.setMinimumHeight(30)
         self.setMaximumHeight(30)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._timer = QTimer(self, interval=33, timeout=self._tick)
+        self._timer = QTimer(self, interval=T.MOTION_FRAME_MS, timeout=self._tick)
+        self._timer.setTimerType(Qt.PreciseTimer)
 
     def set_running(self, running: bool):
         self._running = running
@@ -811,7 +866,7 @@ class MarqueeWidget(_MotionWidget):
 
     def _tick(self):
         speed = 1.8 if self._running else 0.5
-        self._phase = (self._phase + speed * 0.033 * 60) % 100000
+        self._phase = (self._phase + speed * self._frame_delta() * 60) % 100000
         self.update()
 
     def paintEvent(self, _e):
@@ -838,7 +893,7 @@ class MarqueeWidget(_MotionWidget):
 # 悬停扫掠按钮
 # ---------------------------------------------------------------------------
 
-class SweepButton(QWidget):
+class SweepButton(_MotionWidget):
     """
     自绘按钮：悬停时红色斜切扫掠填充 + 文字反色 + 箭头滑动。
     primary=True 时底色为红，扫掠为黑。
@@ -854,11 +909,13 @@ class SweepButton(QWidget):
         self._sweep = 0.0
         self._hover = False
         self._enabled = True
+        self._pressed = False
         self.setMinimumHeight(40)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._anim = QVariantAnimation(self)
-        self._anim.setDuration(240)
+        self._anim.setDuration(T.MOTION_CONTROL_MS)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._on_sweep)
 
@@ -875,6 +932,8 @@ class SweepButton(QWidget):
     def setEnabled(self, on: bool):  # noqa: N802
         self._enabled = bool(on)
         super().setEnabled(on)
+        if not on:
+            self._pressed=False;self._hover=False;self._anim.stop();self._sweep=0.
         self.update()
 
     def set_text(self, text: str):
@@ -889,11 +948,25 @@ class SweepButton(QWidget):
 
     def _animate_to(self, target: float):
         self._anim.stop()
-        if reduced_motion_requested() or not self.isVisible():
+        if self._reduced_motion or self._motion_suspended or not self.isVisible():
             self._sweep=target; self.update(); return
         self._anim.setStartValue(self._sweep)
         self._anim.setEndValue(target)
         self._anim.start()
+
+    def _settle_motion(self):
+        self._sweep = 1. if self._hover and self.isEnabled() else 0.
+
+    def hideEvent(self,event):
+        self._hover=False;self._pressed=False
+        super().hideEvent(event)
+
+    def focusInEvent(self,event):
+        self.update();super().focusInEvent(event)
+
+    def focusOutEvent(self,event):
+        self._pressed=False;self._animate_to(1. if self._hover else 0.)
+        super().focusOutEvent(event)
 
     def enterEvent(self, e):
         if self._enabled:
@@ -908,14 +981,33 @@ class SweepButton(QWidget):
 
     def mousePressEvent(self, e):
         if self._enabled and e.button() == Qt.LeftButton:
-            self._sweep = 1.0
-            self.update()
+            self.setFocus(Qt.MouseFocusReason)
+            self._pressed = True
+            self._animate_to(1.)
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e):
-        if self._enabled and e.button() == Qt.LeftButton and self.rect().contains(e.pos()):
-            self.clicked.emit()
+        if e.button() == Qt.LeftButton:
+            activate=self._pressed and self._enabled and self.rect().contains(e.pos())
+            self._pressed=False
+            self._animate_to(1. if self._hover else 0.)
+            if activate:self.clicked.emit()
         super().mouseReleaseEvent(e)
+
+    def keyPressEvent(self,event):
+        if self.isEnabled() and event.key() in (Qt.Key_Space,Qt.Key_Return,Qt.Key_Enter):
+            if not event.isAutoRepeat():self._pressed=True;self._animate_to(1.)
+            event.accept();return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self,event):
+        if event.key() in (Qt.Key_Space,Qt.Key_Return,Qt.Key_Enter):
+            if not event.isAutoRepeat():
+                activate=self._pressed and self.isEnabled();self._pressed=False
+                self._animate_to(1. if self._hover else 0.)
+                if activate:self.clicked.emit()
+            event.accept();return
+        super().keyReleaseEvent(event)
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -981,6 +1073,9 @@ class SweepButton(QWidget):
         else:
             p.setPen(fg)
             p.drawText(QRectF(tx, 0, tw + 20, h), Qt.AlignVCenter, label)
+        if self.hasFocus():
+            p.setBrush(Qt.NoBrush);p.setPen(QPen(QColor(T.WHITE if self._primary else T.INK_SOFT),1,Qt.DotLine))
+            p.drawRoundedRect(rect.adjusted(5,5,-5,-5),radius-5,radius-5)
         p.end()
 
 
