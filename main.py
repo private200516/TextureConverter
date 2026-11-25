@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
 import config as cfgmod
 import i18n
 import ui_theme as T
-from config import APP_AUTHOR, APP_TITLE, MODES, Config
+from config import APP_AUTHOR, APP_TITLE, APP_VERSION, MODES, Config
 from metal_ui import MetalPanel, t
 from converter import Converter
 from i18n import tr
@@ -43,11 +43,13 @@ from ui_widgets import (BannerWidget, LiveLogWidget,
 class ScanWorker(QThread):
     done=Signal(object)
     failed=Signal(str)
-    def __init__(self,root):
-        super().__init__();self.root=root;self.cancel_event=threading.Event();self.events=UiEventBuffer()
+    def __init__(self,root,include_textures=True):
+        super().__init__();self.root=root;self.include_textures=include_textures
+        self.cancel_event=threading.Event();self.events=UiEventBuffer()
     def run(self):
         try:
-            jobs=scan_jobs(self.root,cancel_event=self.cancel_event,progress_cb=self.events.progress)
+            jobs=scan_jobs(self.root,include_textures=self.include_textures,cancel_event=self.cancel_event,
+                           progress_cb=self.events.progress,inspect_texture_files=self.include_textures)
             if not self.cancel_event.is_set():self.done.emit(jobs)
         except Exception:
             if not self.cancel_event.is_set():self.failed.emit(traceback.format_exc())
@@ -137,13 +139,17 @@ class MainWindow(QMainWindow):
         self.icon_key = icon_key
 
         self._prepared_jobs=None;self._scan_context=None
-        self._preview=None;self._last_output=None
+        self._preview=None;self._last_output=None;self._last_material_source=None
+        self._last_report_dir = None
+        self._preview_refresh_root = None
         self._task_started=None;self._last_done=0;self._last_total=0
         self._show_first_run_about=False
         self._build_ui()
         self._load_into_ui()
         self.in_edit.textChanged.connect(self._invalidate_scan)
+        self.materials_input.textChanged.connect(self._invalidate_scan)
         self.mode_pills.changed.connect(self._apply_quality)
+        self.cb_report.toggled.connect(self._save_report_preference)
         self._event_timer=QTimer(self,interval=100,timeout=self._drain_worker_events)
         self.motion=MotionController(self,self.centralWidget(),title='TEXTURE CONVERTER',author=APP_AUTHOR)
         self.motion.startup_finished.connect(self._startup_complete)
@@ -152,7 +158,6 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._reveal_tab)
         self.advanced.currentChanged.connect(self._reveal_advanced)
         self._close_pending = False
-        self._last_output = None
 
         # 图标热重载：用户替换 EXE 同目录的 icon.* 或用 ResourceHacker
         # 改了 EXE 内嵌图标后，空闲时约 10 秒内程序内 LOGO 同步更新
@@ -333,7 +338,7 @@ class MainWindow(QMainWindow):
         self.cb_log = QCheckBox()
         self.cb_report = QCheckBox()
         self.cb_bgsm = QCheckBox()
-        for cb in (self.cb_overwrite, self.cb_log, self.cb_report, self.cb_bgsm):
+        for cb in (self.cb_overwrite, self.cb_log, self.cb_bgsm):
             ol.addWidget(cb)
         ol.addStretch(1)
         tabs.addTab(out_tab, "")
@@ -346,13 +351,41 @@ class MainWindow(QMainWindow):
             self.advanced.addItem(page,"")
         self.preview_host=QWidget();self.preview_layout=QVBoxLayout(self.preview_host)
         self.preview_layout.setContentsMargins(0,0,0,0)
-        tabs.addTab(self.preview_host,"")
-        tabs.addTab(self.metal_panel,"Metal")
-        tabs.addTab(self.advanced,"")
-        self.preview_tab_index=1;self.metal_tab_index=2;self.advanced_tab_index=3
-        # Outputs are always isolated and reportable in the current backend.
-        for redundant in (self.cb_keep,self.cb_overwrite,self.cb_log,self.cb_report):redundant.hide()
-        notice=QLabel(t("每次转换创建独立结果目录，并保留结构与完整报告。", "Each run keeps folder structure and full reports in a new result directory."))
+        materials_page = QWidget()
+        materials_layout = QVBoxLayout(materials_page)
+        self.materials_group = QGroupBox()
+        materials_form = QFormLayout(self.materials_group)
+        materials_form.setSpacing(12)
+        self.materials_input = QLineEdit()
+        self.materials_output = QLineEdit()
+        self.materials_input_label, self.materials_output_label = QLabel(), QLabel()
+        source_row = self._dir_row(self.materials_input, "pick_in")
+        self.materials_pick_folder = self._browse_btns.pop()
+        self.materials_pick_file = QPushButton()
+        self.materials_pick_file.setObjectName("ghost")
+        self.materials_pick_file.setFixedSize(96, 40)
+        self.materials_pick_file.clicked.connect(self._pick_material_file)
+        source_row.insertWidget(1, self.materials_pick_file)
+        materials_form.addRow(self.materials_input_label, source_row)
+        materials_form.addRow(self.materials_output_label, self._dir_row(self.materials_output, "pick_out"))
+        self.materials_output.textChanged.connect(self.out_edit.setText)
+        self.out_edit.textChanged.connect(self.materials_output.setText)
+        materials_layout.addWidget(self.materials_group)
+        self.materials_hint = QLabel()
+        self.materials_hint.setObjectName("hint")
+        self.materials_hint.setWordWrap(True)
+        materials_layout.addWidget(self.materials_hint)
+        self.materials_summary = QLabel()
+        self._material_summary_text = ("", "")
+        self.materials_summary.setWordWrap(True)
+        materials_layout.addWidget(self.materials_summary)
+        materials_layout.addStretch()
+        self.materials_tab_index = tabs.addTab(materials_page, "")
+        self.preview_tab_index = tabs.addTab(self.preview_host, "")
+        self.metal_tab_index = tabs.addTab(self.metal_panel, "Metal")
+        self.advanced_tab_index = tabs.addTab(self.advanced, "")
+        for redundant in (self.cb_keep,self.cb_overwrite,self.cb_log):redundant.hide()
+        notice=QLabel()
         notice.setWordWrap(True);notice.setObjectName("hint");ol.insertWidget(0,notice)
         self.output_notice=notice
 
@@ -373,8 +406,6 @@ class MainWindow(QMainWindow):
         self.btn_start.setFixedSize(186, 36)
         self.btn_start.setToolTip(tr("tip_start"))
         self.btn_start.clicked.connect(self.on_start)
-
-        self.retranslate()
 
         # ---------- 实时日志控制台 ----------
         self.logview = LiveLogWidget()
@@ -399,15 +430,17 @@ class MainWindow(QMainWindow):
             scroll.setFrameShape(QScrollArea.NoFrame); scroll.setWidget(page)
             self.tabs.insertTab(index,scroll,title)
         actions=QHBoxLayout()
-        self.release_label=QLabel("ALPHA 1.0  /  private0516")
+        self.release_label=QLabel(f"{APP_VERSION}  /  {APP_AUTHOR}")
         self.release_label.setStyleSheet("color:#827e74;font-size:11px;")
-        actions.addWidget(self.release_label); actions.addStretch()
+        actions.addWidget(self.release_label)
+        actions.addWidget(self.cb_report)
+        actions.addStretch()
         self.btn_output=QPushButton(t("打开结果","Open results"));self.btn_output.setEnabled(False)
         self.btn_output.clicked.connect(self.open_output);self.btn_output.setObjectName("ghost")
-        self.btn_output.setToolTip(t("打开最近一次运行的独立结果文件夹。", "Open the latest run's result folder."));actions.addWidget(self.btn_output)
+        actions.addWidget(self.btn_output)
         self.btn_log=QPushButton(t("查看日志","View log"));self.btn_log.setEnabled(False)
         self.btn_log.clicked.connect(self.on_view_log);self.btn_log.setObjectName("ghost")
-        self.btn_log.setToolTip(t("查看最近一次任务的完整日志。", "Read the latest task's complete log."));actions.addWidget(self.btn_log)
+        actions.addWidget(self.btn_log)
         self.btn_about=QPushButton(t("关于与许可", "About & licenses"))
         self.btn_about.setToolTip(t("作者、AI 标注及本地许可说明。", "Author, AI disclosure and local license notices."))
         self.btn_about.clicked.connect(self.show_about); actions.addWidget(self.btn_about)
@@ -415,6 +448,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setToolTip(t("取消当前任务并清理未提交结果，保留已完成文件。", "Cancels the current task, cleans uncommitted output, and retains completed files."))
         self.btn_cancel.setEnabled(False); self.btn_cancel.clicked.connect(self.cancel_work); actions.addWidget(self.btn_cancel)
         root.addLayout(actions)
+        self.retranslate()
         self.tabs.setCurrentIndex(0)
         self.tabs.currentChanged.connect(self._tab_changed)
 
@@ -434,7 +468,7 @@ class MainWindow(QMainWindow):
 
     def retranslate(self):
         """按当前语言刷新所有界面文案与提示气泡。"""
-        self.setWindowTitle("Texture Converter · ALPHA 1.0")
+        self.setWindowTitle(f"Texture Converter · {APP_VERSION}")
         if hasattr(self,"metal_panel"):
             self.tabs.setTabText(self.metal_tab_index,t("金属重建","Metal")); self.metal_panel.retranslate()
         if hasattr(self,"btn_about"):
@@ -443,6 +477,21 @@ class MainWindow(QMainWindow):
 
         self.tabs.setTabText(0,t("转换","Convert"));self.tabs.setTabText(self.advanced_tab_index,t("高级设置","Advanced"))
         self.tabs.setTabText(self.preview_tab_index,t("模型预览","Model preview"))
+        self.tabs.setTabText(self.materials_tab_index,t("材质转换","Materials"))
+        self.materials_group.setTitle(t("转换 BGSM / BGEM","Convert BGSM / BGEM"))
+        self.materials_input_label.setText(t("源材质","Material source"))
+        self.materials_output_label.setText(tr("lbl_out"))
+        material_input_tip = t("选择一个 .bgsm、.bgem 文件或要批量转换的文件夹。", "Select a .bgsm or .bgem file, or a folder to convert in bulk.")
+        self.materials_input.setPlaceholderText(material_input_tip)
+        self.materials_input.setToolTip(material_input_tip)
+        self.materials_output.setPlaceholderText(tr("ph_out"))
+        self.materials_output.setToolTip(tr("tip_out"))
+        self.materials_pick_file.setText(t("选择文件","File…"))
+        self.materials_pick_file.setToolTip(t("选择单个 BGSM 或 BGEM 材质。","Choose one BGSM or BGEM material."))
+        self.materials_pick_folder.setText(t("选择目录","Folder…"))
+        self.materials_pick_folder.setToolTip(t("递归查找目录中的 BGSM 和 BGEM 材质。","Find BGSM and BGEM materials in this folder and its subfolders."))
+        self.materials_hint.setText(t("BGSM 和 BGEM 按原目录写入导出根目录下的 materials 文件夹。可与 Mesh Converter 使用同一根目录。", "BGSM and BGEM files keep their source paths under materials in the export root. You can use the same root in Mesh Converter."))
+        self.materials_summary.setText(t(*self._material_summary_text))
         self.preview_card.setTitle(t("查看转换结果","Inspect your results"))
         self.preview_hint.setText(t("导入自己的 NIF，在模型上检查转换后的材质。", "Load your NIF to inspect converted materials on the model."))
         self.btn_preview.setText(t("打开模型预览 ↗","Open model preview ↗"))
@@ -452,7 +501,9 @@ class MainWindow(QMainWindow):
             self.advanced.setItemText(idx,tr(key))
         if hasattr(self,"btn_output"):
             self.btn_output.setText(t("打开结果","Open results"));self.btn_log.setText(t("查看日志","View log"))
-        self.output_notice.setText(t("每次转换创建独立结果目录，并保留结构与完整报告。", "Each run keeps folder structure and full reports in a new result directory."))
+            self.btn_output.setToolTip(t("打开最近一次任务的导出根目录。", "Open the export root of the last conversion."))
+            self.btn_log.setToolTip(t("打开最近一次转换保存的日志。", "Open the log saved for the last conversion."))
+        self.output_notice.setText(t("材质和贴图按原路径写入 materials 和 textures。同路径同内容的文件可复用，内容冲突会显示在实时日志中。", "Materials and textures keep their paths under materials and textures. Identical files can be reused. The live log identifies conflicting files."))
 
         if not getattr(self,"_prepared_jobs",None) and not getattr(self,"_last_output",None):
             self.scan_summary.setText(t("选择输入与输出，直接开始即可。", "Choose input and output, then start."))
@@ -516,10 +567,14 @@ class MainWindow(QMainWindow):
         self.cb_bgsm.setText(tr("cb_bgsm"));     self.cb_bgsm.setToolTip(tr("tip_bgsm"))
 
         # 操作按钮
-        self.btn_analyze.set_text(t("预检","Inspect"))
-        self.btn_analyze.setToolTip(tr("tip_dry"))
-        self.btn_start.set_text(tr("btn_start"))
-        self.btn_start.setToolTip(tr("tip_start"))
+        self._set_task_labels()
+
+    def _set_task_labels(self):
+        materials = self.tabs.currentIndex() == self.materials_tab_index
+        self.btn_analyze.set_text(t("预检材质", "Inspect materials") if materials else t("预检","Inspect"))
+        self.btn_analyze.setToolTip(t("扫描源材质并统计待转换文件。","Scan the selected materials and count conversion jobs.") if materials else tr("tip_dry"))
+        self.btn_start.set_text(t("转换材质", "Convert materials") if materials else tr("btn_start"))
+        self.btn_start.setToolTip(self.materials_hint.text() if materials else tr("tip_start"))
 
     def _ensure_preview(self):
         if self._preview is None:
@@ -527,11 +582,16 @@ class MainWindow(QMainWindow):
             self._preview=NifPreviewPanel(self)
             self.preview_layout.addWidget(self._preview)
             self._preview.busy_changed.connect(self._preview_busy_changed)
-        converted=self._last_output or self.out_edit.text().strip()
-        if converted and (Path(converted)/"converted").is_dir():converted=str(Path(converted)/"converted")
-        roots=(converted,self.in_edit.text().strip())
-        if not self._preview.is_busy() and roots!=getattr(self,"_preview_root_hint",None):
-            self._preview.set_resource_roots(*roots);self._preview_root_hint=roots
+        converted = self.out_edit.text().strip()
+        roots = (converted, self._last_material_source or self.in_edit.text().strip())
+        if not self._preview.is_busy():
+            if roots != getattr(self, "_preview_root_hint", None):
+                self._preview.set_resource_roots(*roots)
+                self._preview_root_hint = roots
+            if self._preview_refresh_root and self.tabs.currentIndex() == self.preview_tab_index:
+                output = self._preview_refresh_root
+                self._preview_refresh_root = None
+                self._preview.reload_after_export(output)
         return self._preview
 
     def _preview_busy_changed(self,*_):
@@ -540,12 +600,16 @@ class MainWindow(QMainWindow):
         if self._close_pending and not self._busy():QTimer.singleShot(0,self.close)
 
     def _tab_changed(self,index):
+        self._set_task_labels()
         preview=index==self.preview_tab_index
         for widget in (self.logview,self.proc_panel,self.statusbar):widget.setVisible(not preview)
         if preview:self._ensure_preview()
 
     def _reveal_tab(self,index):
         previous=getattr(self,'_motion_tab_index',0);self._motion_tab_index=index
+        if index == self.preview_tab_index:
+            self.navigation_motion.cancel()
+            return
         self.navigation_motion.reveal(self.tabs.currentWidget(),1 if index>=previous else -1)
 
     def _reveal_advanced(self,index):
@@ -564,10 +628,15 @@ class MainWindow(QMainWindow):
 
     def _shutdown_failed(self,message):
         self._close_pending=False
+        if self._preview is not None:
+            self._preview.restore_viewport()
         self.scan_summary.setText(t('无法关闭窗口，已恢复界面：','Could not close the window; workspace restored: ')+message)
 
     def _invalidate_scan(self,*_):
+        self._last_material_source = None
         self._prepared_jobs=None;self._scan_context=None
+        self._material_summary_text = ("", "")
+        self.materials_summary.clear()
         self.scan_summary.setText(t("开始转换时会自动扫描。预检为可选操作。", "Starting scans automatically. Inspection is optional."))
 
     def _apply_quality(self,key):
@@ -580,6 +649,7 @@ class MainWindow(QMainWindow):
     def _load_into_ui(self):
         c = self.cfg
         self.in_edit.setText(c.input_dir)
+        self.materials_input.setText(c.materials_input or c.input_dir)
         self.out_edit.setText(c.output_dir)
         self.mode_pills.set_key(c.mode if c.mode in ("balanced","space") else "balanced",
                                 animate=False)
@@ -605,6 +675,7 @@ class MainWindow(QMainWindow):
     def _collect(self) -> Config:
         c = self.cfg
         c.input_dir = self.in_edit.text().strip()
+        c.materials_input = self.materials_input.text().strip()
         c.output_dir = self.out_edit.text().strip()
         c.mode = self.mode_pills.current_key()
         c.lang = i18n.LANG
@@ -623,19 +694,52 @@ class MainWindow(QMainWindow):
         c.ao_strength = self.sp_ao.value()
         c.metal_strength = self.sp_metal.value()
         c.overwrite = False
-        c.generate_log = True
-        c.generate_report = True
+        c.output_layout = 'game'
+        c.generate_report = self.cb_report.isChecked()
+        c.generate_log = c.generate_report
         c.convert_bgsm = self.cb_bgsm.isChecked()
         self.metal_panel.collect(c)
         cfgmod.save_config(c)
         return c
 
+    def _save_report_preference(self, checked):
+        self.cfg.generate_report = checked
+        self.cfg.generate_log = checked
+        cfgmod.save_config(self.cfg)
+
+    def _export_root(self, path):
+        from material_jobs import game_output_root
+        try:
+            target = game_output_root(path)
+            selected = Path(os.path.abspath(path))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, APP_TITLE, str(exc))
+            return None
+        if selected == target:
+            return str(target)
+        question = t(f"所选位置是资源子目录。是否将以下位置作为导出根目录，在其中创建 materials 和 textures？\n\n{target}",
+                     f"The selected folder is an asset subfolder. Use the following export root for materials and textures?\n\n{target}")
+        if QMessageBox.question(self, APP_TITLE, question, QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel) == QMessageBox.Yes:
+            return str(target)
+        return None
+
     # ================= 目录与拖放 =================
 
     def _pick_dir(self, edit: QLineEdit, title_key: str):
-        d = QFileDialog.getExistingDirectory(self, tr(title_key), edit.text() or "")
+        start = edit.text()
+        if os.path.isfile(start):
+            start = os.path.dirname(start)
+        d = QFileDialog.getExistingDirectory(self, tr(title_key), start)
+        if d and title_key == 'pick_out':
+            d = self._export_root(d)
         if d:
             edit.setText(d)
+
+    def _pick_material_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, self.materials_pick_file.toolTip(),
+                                               self.materials_input.text(), "BGSM / BGEM (*.bgsm *.bgem)")
+        if path:
+            self.materials_input.setText(path)
 
     def dragEnterEvent(self, e):
         if not self._busy() and e.mimeData().hasUrls():
@@ -647,6 +751,10 @@ class MainWindow(QMainWindow):
             p = url.toLocalFile()
             if p.lower().endswith('.nif') and os.path.isfile(p):
                 self.open_model_preview();self._ensure_preview().open_nif(p);break
+            if self.tabs.currentIndex() == self.materials_tab_index and (os.path.isdir(p) or
+                    (Path(p).suffix.lower() in ('.bgsm','.bgem') and os.path.isfile(p))):
+                self.materials_input.setText(p)
+                break
             if os.path.isdir(p):
                 self.in_edit.setText(p)
                 # 拖放反馈：状态栏提示
@@ -658,14 +766,33 @@ class MainWindow(QMainWindow):
 
     def _validate(self) -> Config | None:
         c = self._collect()
-        if not c.input_dir or not os.path.isdir(c.input_dir):
+        if self.tabs.currentIndex() == self.materials_tab_index:
+            c = copy.copy(c)
+            c.input_dir = c.materials_input
+            c.include_textures = False
+            c.convert_bgsm = True
+            c.metal_mode = 'off'
+            source_path = Path(c.input_dir)
+            if not c.input_dir or not (source_path.is_dir() or
+                    (source_path.suffix.lower() in ('.bgsm','.bgem') and source_path.is_file())):
+                QMessageBox.warning(self, APP_TITLE, self.materials_input.toolTip())
+                return None
+        elif not c.input_dir or not os.path.isdir(c.input_dir):
             QMessageBox.warning(self, APP_TITLE, tr("msg_no_in"))
             return None
         if not c.output_dir:
             QMessageBox.warning(self, APP_TITLE, tr("msg_no_out"))
             return None
-        source=os.path.normcase(os.path.realpath(c.input_dir))
-        output=os.path.normcase(os.path.realpath(c.output_dir))
+        output_dir = self._export_root(c.output_dir)
+        if output_dir is None:
+            return None
+        if c.output_dir != output_dir:
+            self.out_edit.setText(output_dir)
+            c.output_dir = self.cfg.output_dir = output_dir
+            cfgmod.save_config(self.cfg)
+        from material_jobs import asset_root
+        source = os.path.normcase(str(asset_root(c.input_dir)))
+        output = os.path.normcase(os.path.realpath(output_dir))
         try: overlap=os.path.commonpath([source,output]) in (source,output)
         except ValueError: overlap=False
         if overlap:
@@ -695,7 +822,7 @@ class MainWindow(QMainWindow):
         if cfg is None:return
         self._begin_task("scanning")
         self.logview.append_system(tr("sys_scan"))
-        self.scanner=ScanWorker(cfg.input_dir)
+        self.scanner=ScanWorker(cfg.input_dir, getattr(cfg, 'include_textures', True))
         self._active_task=self.scanner
         self.scanner.done.connect(self._scanned)
         self.scanner.failed.connect(self._on_failed)
@@ -706,11 +833,20 @@ class MainWindow(QMainWindow):
         self._drain_worker_events(final=True)
         self._prepared_jobs=jobs;self._scan_context=getattr(jobs,"scan_context",None)
         materials=sum(bool(j.get("material_path")) for j in jobs)
-        pending=sum(any(d.split(':',1)[0]!="READY_FOR_METAL_ANALYSIS" for d in j.get("diagnostics",[])) for j in jobs)
-        self.scan_summary.setText(t(f"预检完成：{len(jobs):,} 组任务，{materials:,} 个材质，{pending:,} 组需检查。",f"Inspected: {len(jobs):,} jobs, {materials:,} materials, {pending:,} groups to review."))
+        if self.tabs.currentIndex() == self.materials_tab_index:
+            issues = {"MATERIAL_PARSE_ERROR", "SOURCE_DIRECTION_MISMATCH"}
+            pending = sum(any(item.split(':',1)[0] in issues for item in job.get("diagnostics", [])) for job in jobs)
+            self._material_summary_text = (f"已预检 {materials:,} 个材质 · {pending:,} 个有格式或转换方向问题",
+                                           f"Inspected {materials:,} materials · {pending:,} with format or direction issues")
+            message = t(*self._material_summary_text)
+            self.materials_summary.setText(message)
+        else:
+            pending=sum(any(d.split(':',1)[0]!="READY_FOR_METAL_ANALYSIS" for d in j.get("diagnostics",[])) for j in jobs)
+            message = t(f"预检完成：{len(jobs):,} 组任务，{materials:,} 个材质，{pending:,} 组需检查。",f"Inspected: {len(jobs):,} jobs, {materials:,} materials, {pending:,} groups to review.")
+            self.scan_summary.setText(message)
         self.statusbar.set_state("idle");self.proc_panel.set_stage("idle")
         self.banner.set_running(False);self.logview.set_running(False)
-        self.logview.append_system(self.scan_summary.text())
+        self.logview.append_system(message)
 
     def on_start(self):
         if self._busy():return
@@ -722,6 +858,9 @@ class MainWindow(QMainWindow):
         if cfg is None:return
         self.logview.clear_log();self.banner.set_count(0,0)
         self._begin_task("running");self.logview.append_system(tr("sys_start"))
+        self._last_report_dir = None
+        self.btn_log.setEnabled(False)
+        self.cb_report.setEnabled(False)
         self.worker=ConvertWorker(cfg,jobs=self._prepared_jobs,scan_context=self._scan_context)
         self._active_task=self.worker
         self.worker.done.connect(self._on_convert_done)
@@ -735,7 +874,7 @@ class MainWindow(QMainWindow):
             update=worker.events.drain(512 if final else 80)
             entries=[]
             if update['omitted']:
-                entries.append(('INFO',t(f"高频日志已合并 {update['omitted']:,} 条；完整内容见任务报告。",f"Coalesced {update['omitted']:,} display entries; complete records are in the task report."),''))
+                entries.append(('INFO',t(f"实时日志已合并 {update['omitted']:,} 条较早的记录。",f"The live log condensed {update['omitted']:,} earlier entries."),''))
             entries.extend(update['logs'])
             if entries:self.logview.append_entries(entries)
             if update['progress']:self._on_progress(*update['progress'])
@@ -765,20 +904,39 @@ class MainWindow(QMainWindow):
         self.proc_panel.set_counters(log.warnings,log.errors)
         self.logview.set_running(False);self.banner.set_running(False)
         self.banner.set_count(log.success_total,0)
-        self._last_output=getattr(log,"output_dir",None) or self.cfg.output_dir
-        self.btn_output.setEnabled(bool(self._last_output));self.btn_log.setEnabled(bool(self._last_output))
-        if self._preview is not None:self._ensure_preview()
+        self._last_output = getattr(log, "output_dir", None)
+        self._last_report_dir = getattr(log, "report_dir", None)
+        if self.worker is not None:
+            from material_jobs import asset_root
+            self._last_material_source = str(asset_root(self.worker.cfg.input_dir))
+        self.btn_output.setEnabled(bool(self._last_output))
+        self.btn_log.setEnabled(bool(self._last_report_dir))
+        if self._preview is not None:
+            if log.success_total:
+                self._preview_refresh_root = self._last_output
+            self._ensure_preview()
         message=(t("已取消。", "Cancelled. ") if cancelled else t("处理结束。", "Finished. "))+log.summary()
-        self.scan_summary.setText(message);self.logview.append_system(message)
-        self.logview.append_system(t("结果已另存，可使用底部的打开结果或查看日志。", "Results saved separately. Use Open results or View log below."))
+        if self.tabs.currentIndex() == self.materials_tab_index:
+            phase_zh, phase_en = ("已取消", "Cancelled") if cancelled else ("已完成", "Finished")
+            self._material_summary_text = (
+                f"{phase_zh} · 成功 {log.success_total:,} · 警告 {log.warnings:,} · 错误 {log.errors:,}",
+                f"{phase_en} · {log.success_total:,} succeeded · {log.warnings:,} warnings · {log.errors:,} errors")
+            message = t(*self._material_summary_text)
+            self.materials_summary.setText(message)
+        else:
+            self.scan_summary.setText(message)
+        self.logview.append_system(" · ".join(message.splitlines()))
+        if self._last_output:
+            self.logview.append_system(t("导出根目录　", "Export root  ") + str(self._last_output))
+        if self._last_report_dir:
+            self.logview.append_system(t("报告目录　", "Reports  ") + str(self._last_report_dir))
 
     def open_output(self):
         if self._last_output and os.path.isdir(self._last_output):os.startfile(self._last_output)
 
     def on_view_log(self):
-        path = os.path.join(self._last_output or self.cfg.output_dir or "", "conversion_log.txt")
-        if not os.path.isfile(path):path=os.path.join(self._last_output or self.cfg.output_dir or "", "reports", "conversion_log.txt")
-        if os.path.isfile(path):
+        path = os.path.join(self._last_report_dir, "conversion_log.txt") if self._last_report_dir else None
+        if path and os.path.isfile(path):
             # Large reports stay out of the GUI event loop.
             os.startfile(path)
         else:
@@ -791,20 +949,19 @@ class MainWindow(QMainWindow):
         self.logview.set_running(False)
         self.logview.append_system(tr("sys_failed"))
         self.banner.set_running(False)
-        try:
-            with open(os.path.join(cfgmod.app_dir(), "error.log"),
-                      "a", encoding="utf-8") as f:
-                f.write(tb + "\n")
-        except OSError:
-            pass
-        QMessageBox.critical(self, APP_TITLE,
-                             tr("msg_fatal") + tb.splitlines()[-1])
+        message = tb.splitlines()[-1] if tb else tr("sys_failed")
+        self.logview.append_system(message)
+        dialog = QMessageBox(QMessageBox.Critical, APP_TITLE, message, QMessageBox.Ok, self)
+        dialog.setTextFormat(Qt.PlainText)
+        dialog.setDetailedText(tb)
+        dialog.exec()
 
     def _re_enable(self):
         work_busy=bool((self.worker and self.worker.isRunning()) or (self.scanner and self.scanner.isRunning()))
         busy=self._busy()
         self.btn_start.setEnabled(not busy); self.btn_analyze.setEnabled(not busy)
         self.tabs.setEnabled(not work_busy); self.btn_cancel.setEnabled(busy)
+        self.cb_report.setEnabled(not work_busy)
         if not work_busy:
             self._drain_worker_events(final=True);self._event_timer.stop()
             self.logview.set_running(False);self.banner.set_running(False)
@@ -822,7 +979,7 @@ class MainWindow(QMainWindow):
             self.logview.append_system(t("正在取消：停止当前编解码并清理未提交结果。", "Cancelling the current codec operation and cleaning uncommitted output."))
 
     def show_about(self):
-        text=t("作者：private0516\n版本：ALPHA 1.0\n项目代码：GPL-3.0\n\n使用 GPT-6 Astra 完成开发，代码与界面包含 AI 生成内容。本工具不代表 OpenAI 或 Bethesda 背书。\n\n本地离线处理。金属预设为实验性质；文件校验通过不等于游戏内视觉验收。\n\n许可与第三方组件说明随程序提供，请查看 LICENSE 和 THIRD_PARTY_NOTICES.txt。字体和游戏资源不属于项目代码许可范围。", "Author: private0516\nVersion: ALPHA 1.0\nProject code: GPL-3.0\n\nDeveloped using GPT-6 Astra. Code and interface include AI-generated content. Not endorsed by OpenAI or Bethesda.\n\nLocal, offline processing. Metal profiles are experimental; file validation does not equal in-game visual acceptance.\n\nSee bundled LICENSE and THIRD_PARTY_NOTICES.txt for project and dependency terms. Project code licensing does not cover fonts or game resources.")
+        text=t(f"作者：{APP_AUTHOR}\n版本：{APP_VERSION}\n项目代码：GPL-3.0\n\n使用 GPT-6 Astra 完成开发，代码与界面包含 AI 生成内容。本工具不代表 OpenAI 或 Bethesda 背书。\n\n本地离线处理。金属预设为实验性质；文件校验通过不等于游戏内视觉验收。\n\n许可与第三方组件说明随程序提供，请查看 LICENSE 和 THIRD_PARTY_NOTICES.txt。字体和游戏资源不属于项目代码许可范围。", f"Author: {APP_AUTHOR}\nVersion: {APP_VERSION}\nProject code: GPL-3.0\n\nDeveloped using GPT-6 Astra. Code and interface include AI-generated content. Not endorsed by OpenAI or Bethesda.\n\nLocal, offline processing. Metal profiles are experimental; file validation does not equal in-game visual acceptance.\n\nSee bundled LICENSE and THIRD_PARTY_NOTICES.txt for project and dependency terms. Project code licensing does not cover fonts or game resources.")
         TextDialog(t("关于与许可", "About & licenses"),text,self).exec()
         self.cfg.about_seen=True; cfgmod.save_config(self.cfg)
 
@@ -840,6 +997,8 @@ class MainWindow(QMainWindow):
             e.accept();return
         self._collect();e.ignore();self._show_first_run_about=False
         self.navigation_motion.cancel()
+        if self._preview is not None and self._preview.isVisible() and not self.motion.reduced_motion:
+            self._preview.freeze_for_close()
         self.motion.shutdown(lambda: QTimer.singleShot(0,self.close))
 
 
@@ -848,6 +1007,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationVersion(APP_VERSION)
     families = cfgmod.register_fonts()
     if families:
         print("fonts:", ", ".join(sorted(set(families))))

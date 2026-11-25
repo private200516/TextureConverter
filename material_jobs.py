@@ -29,9 +29,10 @@ def _stamp(path):
     return (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_size)
 
 
-def scan_context_matches(context, root, direction='76-to-4', include_textures=True, cancel_event=None):
+def scan_context_matches(context, root, direction='76-to-4', include_textures=True, cancel_event=None, *, inspect_texture_files=True):
     if not context or context.get('input_root') != str(Path(root).resolve()):return False
     if context.get('direction') != direction or context.get('include_textures') != include_textures:return False
+    if (include_textures or inspect_texture_files) and not context.get('texture_files_checked',True):return False
     stamps=context.get('directory_stamps')
     if not stamps:return False
     for path,stamp in stamps.items():
@@ -42,7 +43,7 @@ def scan_context_matches(context, root, direction='76-to-4', include_textures=Tr
     return True
 
 
-def walk_files(root,cancel_event=None,directory_stamps=None):
+def walk_files(root,cancel_event=None,directory_stamps=None,*,materials_only=False):
     """Yield sorted files with finite tree and resource budgets.
 
     Count every directory entry while scandir streams it, before collecting a
@@ -53,7 +54,8 @@ def walk_files(root,cancel_event=None,directory_stamps=None):
     import stat
     def cancelled():return cancel_event is not None and cancel_event.is_set()
     def limit(code,message):raise ValueError(code+': '+message+'; select a smaller asset directory or process in batches')
-    def resource(path):return Path(path).suffix.lower() in ('.dds','.bgsm','.bgem')
+    suffixes = ('.bgsm', '.bgem') if materials_only else ('.dds', '.bgsm', '.bgem')
+    def resource(path):return Path(path).suffix.lower() in suffixes
     if cancelled():return
     root=assert_no_reparse(root)
     if root.is_file():
@@ -69,7 +71,7 @@ def walk_files(root,cancel_event=None,directory_stamps=None):
     while pending:
         if cancelled():return
         base=pending.pop();directories=[];files=[]
-        with pinned_path(base),os.scandir(base) as entries:
+        with pinned_path(base,must_exist=True),os.scandir(base) as entries:
             if directory_stamps is not None:directory_stamps[str(base)]=_stamp(base)
             for entry in entries:
                 if cancelled():return
@@ -86,7 +88,8 @@ def walk_files(root,cancel_event=None,directory_stamps=None):
                         files_seen+=1;selected_bytes+=info.st_size
                         if files_seen>MAX_SCAN_FILES:limit('SCAN_FILE_LIMIT',f'input tree exceeds {MAX_SCAN_FILES:,} resource files')
                         if selected_bytes>MAX_SCAN_BYTES:limit('SCAN_BYTE_LIMIT',f'selected assets exceed {MAX_SCAN_BYTES:,} bytes')
-                    files.append(entry.name)
+                    if not materials_only or resource(entry.name):
+                        files.append(entry.name)
         for name in sorted(files):
             if cancelled():return
             yield base/name
@@ -122,19 +125,30 @@ def _scan_resource_root(files, fallback, cancel_event=None):
                              '(Fallout 4 or Fallout 76), rather than their shared parent')
     return next(iter(roots.values()),fallback)
 
+def game_output_root(path):
+    selected = assert_no_reparse(path)
+    return selected.parent if selected.name.lower() in ('meshes', 'materials', 'textures') else selected
+
+
 def asset_relative(path,base,category):
     rel=Path(path).resolve().relative_to(base).as_posix()
-    return rel if rel.split('/')[0].lower() in ('textures','materials') else category+'/'+rel
+    return rel if rel.split('/')[0].lower()==category else category+'/'+rel
 
-def resolve_reference(base,reference,category='textures'):
+def reference_relative(reference, category):
     rel=safe_relative(reference)
     if rel.lower().startswith('data/'+category+'/'):rel=rel[5:]
     if rel.split('/')[0].lower()!=category:rel=category+'/'+rel
+    return rel
+
+def resolve_reference(base,reference,category='textures'):
+    rel=reference_relative(reference,category)
     candidate=assert_no_reparse(base/rel)
     if not candidate.is_relative_to(base):raise ValueError('Reference escapes resource root')
     return candidate,rel
 
-def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,progress_cb=None):
+def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,progress_cb=None,*,inspect_texture_files=True):
+    # Material-only export consumes the references as strings; callers can also request a file audit.
+    check_textures = include_textures or inspect_texture_files
     if direction not in ('76-to-4','4-to-76'):raise ValueError('Invalid direction')
     root=assert_no_reparse(root);base=asset_root(root)
     if not root.exists():raise FileNotFoundError(root)
@@ -145,11 +159,11 @@ def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,p
         if progress_cb and (force or seen%250==0 or now-last_progress>=.1):
             progress_cb(seen,0,str(name));last_progress=now
     files=[]
-    for path in walk_files(root,cancel_event,directory_stamps=stamps):
+    for path in walk_files(root,cancel_event,directory_stamps=stamps,materials_only=not include_textures):
         if path.suffix.lower() in (('.dds','.bgsm','.bgem') if include_textures else ('.bgsm','.bgem')):files.append(path)
         progress(path)
     base=_scan_resource_root(files,base,cancel_event)
-    context=dict(input_root=str(root),direction=direction,include_textures=include_textures,directory_stamps=stamps)
+    context=dict(input_root=str(root),direction=direction,include_textures=include_textures,directory_stamps=stamps,texture_files_checked=check_textures)
     jobs=PreparedJobs(scan_context=context);referenced=set();reference_cache=OrderedDict()
     def reference(ref):
         key=ref.lower()
@@ -164,7 +178,7 @@ def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,p
         return value
     def scanned_relative(path,category):
         rel=path.relative_to(base).as_posix()
-        return rel if rel.split('/')[0].lower() in ('textures','materials') else category+'/'+rel
+        return rel if rel.split('/')[0].lower()==category else category+'/'+rel
     for path in files:
         if cancel_event is not None and cancel_event.is_set():return []
         if path.suffix.lower() not in ('.bgsm','.bgem'):continue
@@ -177,15 +191,21 @@ def scan_jobs(root,direction='76-to-4',include_textures=True,cancel_event=None,p
                 j['diagnostics'].append('SOURCE_DIRECTION_MISMATCH: select the source game and conversion direction explicitly')
             mapping={'DiffuseTexture':'d','BaseTexture':'d','NormalTexture':'n','SpecularTexture':'r','LightingTexture':'l','SmoothSpecTexture':'s','GlowTexture':'g'}
             for slot,ref in mat.textures().items():
+                if not check_textures:
+                    texrel = reference_relative(ref, 'textures')
+                    j['texture_references'][slot] = dict(source=str(base/texrel),relative=texrel,exists=None)
+                    continue
                 resolved,texrel,exists=reference(ref)
                 referenced.add(str(resolved).lower())
                 if not exists:j['diagnostics'].append('MATERIAL_REFERENCE_ERROR: '+slot+' '+ref)
                 j['texture_references'][slot]=dict(source=str(resolved),relative=texrel,exists=exists)
                 role=mapping.get(slot)
                 if role and exists:j['texture_paths'][role]=str(resolved)
-            if mat.kind=='BGEM' or any(mat.fields.get(k) for k in ('AlphaBlend0','AlphaTest','Refraction','GrayscaleToPaletteColor','Translucency','Hair','Tree','Facegen','SkinTint','Terrain','Glowmap','EmitEnabled','ModelSpaceNormals')) or any(mat.fields.get(k) for k in ('GreyscaleTexture','FlowTexture','InnerLayerTexture','WrinklesTexture')):
+            if not check_textures:
+                if not j['diagnostics']:j['diagnostics'].append('READY_FOR_MATERIAL_CONVERSION')
+            elif mat.kind=='BGEM' or any(mat.fields.get(k) for k in ('AlphaBlend0','AlphaTest','Refraction','GrayscaleToPaletteColor','Translucency','Hair','Tree','Facegen','SkinTint','Terrain','Glowmap','EmitEnabled','ModelSpaceNormals')) or any(mat.fields.get(k) for k in ('GreyscaleTexture','FlowTexture','InnerLayerTexture','WrinklesTexture')):
                 j['diagnostics'].append('UNSUPPORTED_SHADER')
-            if 'r' not in j['texture_paths']:j['diagnostics'].append('MISSING_REFLECTANCE')
+            if check_textures and 'r' not in j['texture_paths']:j['diagnostics'].append('MISSING_REFLECTANCE')
             if not j['diagnostics']:j['diagnostics'].append('READY_FOR_METAL_ANALYSIS')
         except Exception as e:j['diagnostics'].append('MATERIAL_PARSE_ERROR: '+str(e))
         j['_paths_resolved']=True;jobs.append(j);progress(path)

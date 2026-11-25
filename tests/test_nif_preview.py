@@ -17,18 +17,20 @@ def string(value):
     data=value.encode('utf8');return P('I',len(data))+data
 IDENTITY=(0.,0.,0.,1.,0.,0.,0.,1.,0.,0.,0.,1.,1.)
 
-def fixture(path, version=130, reference='Materials/Test/sample.bgsm', transform=None, triangles=None):
+def fixture(path, version=130, reference='Materials/Test/sample.bgsm', transform=None, triangles=None, vertex_uvs=None):
     strings=['Scene','Triangle',reference]
     def net(name): return P('iIi',name,0,-1)
     def av(name, matrix): return net(name)+P('I13fi',14,*matrix,-1)
     root=av(0,transform or IDENTITY)+P('Ii',1,1)
     descriptor=7|(4<<8)|(5<<16)|(6<<24)|(0x42B<<44)
-    raw=b''.join(P('4f2e4B4B',*point,0.,*uv,128,0,128,0,255,255,255,255)
-                 for point,uv in [((-1.,0.,0.),(0.,0.)),((1.,0.,0.),(1.,0.)),((0.,0.,2.),(.5,1.))])
-    raw+=P('3H',*(triangles or (0,1,2)))
+    if vertex_uvs is None:
+        vertex_uvs = [((-1.,0.,0.),(0.,0.)),((1.,0.,0.),(1.,0.)),((0.,0.,2.),(.5,1.))]
+    indices = (0,1,2) if triangles is None else triangles
+    raw=b''.join(P('4f2e4B4B',*point,0.,*uv,128,0,128,0,255,255,255,255) for point,uv in vertex_uvs)
+    raw+=P(str(len(indices))+'H',*indices)
     shape=av(1,IDENTITY)+P('4f',0.,0.,0.,2.)
     if version==155:shape+=P('6f',0.,0.,0.,2.,2.,2.)
-    shape+=P('iiiQIHI',-1,2,-1,descriptor,1,3,len(raw))+raw
+    shape+=P('iiiQIHI',-1,2,-1,descriptor,len(indices)//3,len(vertex_uvs),len(raw))+raw
     shader=net(2)
     if version==130:shader=P('I',0)+shader
     types=['NiNode','BSTriShape','BSLightingShaderProperty']
@@ -78,6 +80,16 @@ class PreviewDataTests(unittest.TestCase):
         self.assertEqual(mat.source,'converted')
         np.testing.assert_array_equal(mat.textures['base'][1][0,0],[0,255,0,255])
         for p,digest in before.items():self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(),digest)
+    def test_shared_tree_wins_over_stale_isolated_export_inside_it(self):
+        shared = self.output.parent
+        write_material(shared, (0, 224, 0, 255))
+        write_material(shared / 'converted', (224, 0, 0, 255))
+        for chosen in (shared, shared / 'textures'):
+            scene = load_scene(self.nif, chosen)
+            self.assertEqual(scene.meshes[0].material.source, 'converted')
+            color = scene.meshes[0].material.textures['base'][1][0, 0]
+            np.testing.assert_array_equal(color, [0, 224, 0, 255])
+
     def test_source_fallback_is_explicit(self):
         write_material(self.source,(255,0,0,255))
         scene=load_scene(self.nif,self.output,self.source)

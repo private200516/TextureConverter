@@ -1,11 +1,11 @@
 """Offline batch CLI; shares GUI preview/export algorithms."""
 import argparse,json,threading,signal
-from config import Config
+from config import APP_VERSION, Config
 from options_policy import processing_options
 from texture_api import scan_jobs,run_jobs
 
 def main():
-    p=argparse.ArgumentParser(description='Texture Converter ALPHA 1.0 - local material and texture adaptation')
+    p=argparse.ArgumentParser(description=f'Texture Converter {APP_VERSION} - local material and texture adaptation')
     p.add_argument('input',nargs='?');p.add_argument('output',nargs='?')
     p.add_argument('--input-dir',dest='input_dir');p.add_argument('--output-dir',dest='output_dir')
     p.add_argument('--direction',choices=['76-to-4','4-to-76'],default='76-to-4')
@@ -13,19 +13,28 @@ def main():
     p.add_argument('--options',help='JSON file of explicit metal/color-space options')
     p.add_argument('--dry-run',action='store_true');p.add_argument('--analyze-only',action='store_true')
     p.add_argument('--materials-only',action='store_true');p.add_argument('--no-mipmaps',action='store_true')
+    p.add_argument('--output-layout',choices=('game','isolated'),default='game',help='Write game folders directly under the output root, or create a separate run folder.')
+    p.add_argument('--report',action=argparse.BooleanOptionalAction,default=True,help='Save conversion reports and logs to disk.')
     a=p.parse_args();src=a.input_dir or a.input;dst=a.output_dir or a.output
     if not src or not dst:p.error('input and output are required')
     if a.dry_run and a.analyze_only:p.error('choose dry-run or analyze-only')
     cfg=Config(input_dir=src,output_dir=dst,metal_mode=a.metal_mode,generate_mipmap=not a.no_mipmaps,overwrite=False)
+    from material_jobs import game_output_root
+    from security_io import assert_no_reparse
+    if a.output_layout=='game' and game_output_root(dst)!=assert_no_reparse(dst):
+        p.error('Choose the parent of meshes, materials or textures as the shared output root.')
+    cfg.output_layout=a.output_layout
+    cfg.generate_report=a.report
     cfg.direction=a.direction
     if a.options:
         from security_io import read_bounded, json_bounded, MAX_JSON_BYTES
         cfg.metal_options=processing_options(json_bounded(read_bounded(a.options,MAX_JSON_BYTES,'Options')), '--options')
     cancel=threading.Event()
     previous=signal.signal(signal.SIGINT,lambda *_:cancel.set())
-    jobs=scan_jobs(src,a.direction,include_textures=not a.materials_only,cancel_event=cancel)
+    jobs=scan_jobs(src,a.direction,include_textures=not a.materials_only,cancel_event=cancel,
+                   inspect_texture_files=not a.materials_only)
     log=run_jobs(jobs,cfg,log_cb=lambda level,path,msg:print(json.dumps(dict(level=level,path=path,message=msg),ensure_ascii=True),flush=True),cancel_event=cancel,dry_run=a.dry_run,analyze_only=a.analyze_only)
-    print(json.dumps(dict(output_dir=log.output_dir,errors=log.errors,game_verified=False)))
+    print(json.dumps(dict(output_dir=log.output_dir,report_dir=log.report_dir,errors=log.errors,game_verified=False)))
     signal.signal(signal.SIGINT,previous)
     return 130 if cancel.is_set() else 1 if log.errors else 0
 

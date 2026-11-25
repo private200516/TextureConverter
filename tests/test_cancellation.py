@@ -59,7 +59,7 @@ class EncoderCancellationTests(unittest.TestCase):
         event = threading.Event(); event.set()
         with patch('dds.subprocess.Popen') as spawn:
             with self.assertRaises(dds.CancellationRequested):
-                dds._run_texconv(['unused'], event)
+                dds._run_texconv([__file__], event)
         spawn.assert_not_called()
 
     def test_cancel_stops_reaps_only_owned_process_without_pipes(self):
@@ -67,7 +67,7 @@ class EncoderCancellationTests(unittest.TestCase):
         unrelated = OwnedEncoder()
         with patch('dds.subprocess.Popen', return_value=owned) as spawn:
             with self.assertRaises(dds.CancellationRequested):
-                dds._run_texconv(['unused'], event)
+                dds._run_texconv([__file__], event)
         self.assertTrue(owned.terminated)
         self.assertIsNotNone(owned.returncode)
         self.assertFalse(unrelated.terminated or unrelated.killed)
@@ -81,7 +81,7 @@ class EncoderCancellationTests(unittest.TestCase):
         event = threading.Event(); owned = OwnedEncoder(event, kill_required=True)
         with patch('dds.subprocess.Popen', return_value=owned):
             with self.assertRaises(dds.CancellationRequested):
-                dds._run_texconv(['unused'], event)
+                dds._run_texconv([__file__], event)
         self.assertTrue(owned.terminated and owned.killed)
         self.assertEqual(owned.returncode, -1)
         self.assertEqual(owned.waits[-2:], [2, 2])
@@ -90,7 +90,7 @@ class EncoderCancellationTests(unittest.TestCase):
         owned = OwnedEncoder()
         with patch('dds.subprocess.Popen', return_value=owned):
             with self.assertRaisesRegex(dds.DDSError, 'timed out'):
-                dds._run_texconv(['unused'], timeout=0)
+                dds._run_texconv([__file__], timeout=0)
         self.assertTrue(owned.terminated)
         self.assertIsNotNone(owned.returncode)
 
@@ -98,7 +98,7 @@ class EncoderCancellationTests(unittest.TestCase):
         owned = OwnedEncoder(wait_error=True)
         with patch('dds.subprocess.Popen', return_value=owned):
             with self.assertRaisesRegex(OSError, 'simulated'):
-                dds._run_texconv(['unused'])
+                dds._run_texconv([__file__])
         self.assertTrue(owned.terminated)
         self.assertIsNotNone(owned.returncode)
 
@@ -110,7 +110,7 @@ class EncoderCancellationTests(unittest.TestCase):
             return owned
         with patch('dds.subprocess.Popen', side_effect=spawn):
             with self.assertRaisesRegex(dds.DDSError, 'diagnostic output'):
-                dds._run_texconv(['unused'])
+                dds._run_texconv([__file__])
         self.assertTrue(owned.terminated)
         self.assertIsNotNone(owned.returncode)
 
@@ -124,7 +124,7 @@ class EncoderCancellationTests(unittest.TestCase):
             kwargs['stderr'].write(b'warning'); kwargs['stderr'].flush()
             return owned
         with patch('dds.subprocess.Popen', side_effect=spawn):
-            result = dds._run_texconv(['unused'])
+            result = dds._run_texconv([__file__])
         self.assertEqual(result.returncode, 0)
         self.assertEqual(len(result.stdout), 65536)
         self.assertEqual(result.stderr, 'warning')
@@ -293,6 +293,7 @@ class GroupRetentionTests(unittest.TestCase):
                 event.set(); raise dds.CancellationRequested()
             return original(*args, **kwargs)
         cfg = Config(input_dir=str(self.source), output_dir=str(self.output), metal_mode='off',
+                     output_layout='isolated',
                      metal_options={'texconv_path': False, 'diffuse_fmt': 'BC3_UNORM'})
         with patch('texture_api._encode', side_effect=encode):
             log = texture_api.run_jobs(self.jobs, cfg, cancel_event=event)
@@ -342,6 +343,7 @@ class GroupRetentionTests(unittest.TestCase):
             if path.parent.name == '.manifests' and path.suffix == '.tmp': event.set()
             return result
         cfg = Config(input_dir=str(self.source), output_dir=str(self.output), metal_mode='off',
+                     output_layout='isolated',
                      metal_options={'texconv_path': False, 'diffuse_fmt': 'BC3_UNORM'})
         with patch.object(Path, 'replace', publish):
             log = texture_api.run_jobs(self.jobs, cfg, cancel_event=event)
@@ -362,6 +364,7 @@ class GroupRetentionTests(unittest.TestCase):
         def encode(*args, **kwargs):
             started.append(1); raise dds.EncoderCleanupError('owned encoder still alive')
         cfg = Config(input_dir=str(self.source), output_dir=str(self.output), metal_mode='off',
+                     output_layout='isolated',
                      metal_options={'texconv_path': False, 'diffuse_fmt': 'BC3_UNORM'})
         with patch('texture_api._encode', side_effect=encode):
             with self.assertRaises(dds.EncoderCleanupError):
@@ -383,6 +386,7 @@ class GroupRetentionTests(unittest.TestCase):
             if len(started) == 2: raise dds.EncoderCleanupError('cannot reap owned encoder')
             return original(*args, **kwargs)
         cfg = Config(input_dir=str(self.source), output_dir=str(self.output), metal_mode='off',
+                     output_layout='isolated',
                      metal_options={'texconv_path': False, 'diffuse_fmt': 'BC3_UNORM'})
         with patch('texture_api._encode', side_effect=encode):
             with self.assertRaises(dds.EncoderCleanupError):

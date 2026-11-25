@@ -107,7 +107,7 @@ def run():
             window.tabs.setCurrentIndex(window.advanced_tab_index)
         def about():
             dialog[0]=main.TextDialog('About & licenses',
-                'Author: private0516\nVersion: ALPHA 1.0\n\nDeveloped using GPT-6 Astra.\nProject code: GPL-3.0\n\nSee bundled LICENSE and THIRD_PARTY_NOTICES.txt.',window)
+                f'Author: {config.APP_AUTHOR}\nVersion: {config.APP_VERSION}\n\nDeveloped using GPT-6 Astra.\nProject code: GPL-3.0\n\nSee bundled LICENSE and THIRD_PARTY_NOTICES.txt.',window)
             dialog[0].show()
         def load():
             window.tabs.setCurrentIndex(0)

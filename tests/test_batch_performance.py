@@ -53,7 +53,7 @@ class BatchPerformanceTests(unittest.TestCase):
         self.cfg.job_overrides=NoDeepCopy({str(i):{'reconstruction_strength':.2} for i in range(40)})
         with patch('texture_api.run_job',side_effect=self.fake),patch('texture_api.ConversionLog',side_effect=lambda:ConversionLog(max_entries=5)):
             log=run_jobs(jobs,self.cfg)
-        reports=Path(log.output_dir)/'reports';report=json.loads((reports/'report.json').read_text())
+        reports=Path(log.report_dir);report=json.loads((reports/'report.json').read_text())
         self.assertEqual(len(log.entries),5);self.assertEqual(log.total_entries,40);self.assertEqual(report['processed'],40)
         self.assertEqual(len(report['results']),40);self.assertEqual(len(json.loads((reports/'validation_results.json').read_text())),40)
         self.assertEqual(len(json.loads((reports/'conversion_manifest.json').read_text())),40)
@@ -63,8 +63,8 @@ class BatchPerformanceTests(unittest.TestCase):
         jobs=scan_jobs(self.source);event=threading.Event()
         def progress(*_):event.set()
         log=run_jobs(jobs,self.cfg,progress_cb=progress,cancel_event=event)
-        report=json.loads((Path(log.output_dir)/'reports/report.json').read_text())
-        self.assertTrue(report['cancelled']);self.assertEqual(report['processed'],0);self.assertTrue((Path(log.output_dir)/'PARTIAL').is_file())
+        report=json.loads((Path(log.report_dir)/'report.json').read_text())
+        self.assertTrue(report['cancelled']);self.assertEqual(report['processed'],0);self.assertTrue((Path(log.report_dir)/'PARTIAL').is_file())
     def test_bad_mask_isolated_to_single_job(self):
         template=scan_jobs(self.source)[0];jobs=[dict(template,id='bad'),dict(template,id='good')]
         self.cfg.metal_mode='manual'

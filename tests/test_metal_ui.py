@@ -33,7 +33,9 @@ class UITests(unittest.TestCase):
         QTest.qWait(50)
         self.assertFalse(dialog.work is not None and dialog.work.isRunning())
     def test_bilingual_panel_and_startup(self):
-        self.assertEqual(self.w.tabs.count(),4)
+        self.w._on_lang('en')
+        self.assertEqual([self.w.tabs.tabText(index) for index in range(self.w.tabs.count())],
+                         ['Convert', 'Materials', 'Model preview', 'Metal', 'Advanced'])
         self.w.tabs.setCurrentIndex(self.w.metal_tab_index);QTest.qWait(250)
         self.assertTrue(self.w.metal_panel.open_btn.isVisible())
         self.w._on_lang('en');self.assertEqual(self.w.tabs.tabText(self.w.metal_tab_index),'Metal')

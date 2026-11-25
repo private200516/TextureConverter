@@ -18,6 +18,7 @@ from semantic_dds import validate_mip_layout
 from material_codec import parse as parse_material
 
 MAX_NIF_BYTES = 64 * 1024 * 1024
+MAX_NIF_BLOCKS = 100_000
 MAX_TRIANGLES = 600_000
 MAX_VERTICES = 600_000
 MAX_TEXTURE_BYTES = 128 * 1024 * 1024
@@ -46,9 +47,11 @@ class Reader:
     def u(self): return self.get('I')[0]
     def i(self): return self.get('i')[0]
     def array(self, fmt, count):
-        if count < 0 or count > (len(self.data) - self.pos) // struct.calcsize('<' + fmt):
-            raise PreviewError('Array exceeds NIF block')
-        return self.get(fmt * count)
+        # Arrays here are block tables, scene links or group counts. Limit the
+        # Python tuple allocation before unpacking and use a counted format.
+        if not 0 <= count <= MAX_NIF_BLOCKS or count > (len(self.data) - self.pos) // struct.calcsize('<' + fmt):
+            raise PreviewError('Array exceeds preview block limit or remaining NIF bytes')
+        return self.get(str(count) + fmt)
     def string(self):
         size = self.u()
         if size > 32768: raise PreviewError('Oversized NIF string')
@@ -69,7 +72,7 @@ class NifReader:
         version, endian, user, count, self.bs = r.get('IBIII')
         if (version, endian, user) != (0x14020007, 1, 12) or self.bs not in (130, 155):
             raise PreviewError('Preview supports FO4 BS130 and FO76 BS155 NIFs')
-        if not 0 < count <= 100_000 or count > len(r.data) // 6:
+        if not 0 < count <= MAX_NIF_BLOCKS or count > len(r.data) // 6:
             raise PreviewError('Invalid NIF block count')
         r.short_string()
         if self.bs > 130: r.u()
@@ -138,9 +141,13 @@ class ResourceResolver:
             if not value: continue
             from security_io import assert_no_reparse
             root = assert_no_reparse(value)
-            # Accept the converter's run folder, its converted child, or Data root.
-            if (root / 'converted').is_dir(): root = assert_no_reparse(root / 'converted')
-            if root.name.casefold() in ('materials', 'textures', 'meshes'): root = root.parent
+            if root.name.casefold() in ('materials', 'textures', 'meshes'):
+                root = root.parent
+            # Legacy run folders contain a converted child. A game tree at the
+            # selected root takes priority, even if an old export was left there.
+            if label == 'converted' and (root / 'converted').is_dir() and not any(
+                    (root / name).is_dir() for name in ('materials', 'textures', 'meshes')):
+                root = assert_no_reparse(root / 'converted')
             if root.is_dir() and root not in [r for _, r in self.roots]: self.roots.append((label, root))
     def resolve(self, reference, category):
         relative = clean_reference(reference, category)
@@ -167,7 +174,8 @@ class PreviewMaterial:
 @dataclass
 class PreviewMesh:
     name: str
-    vertices: np.ndarray  # position3, normal3, uv2, color4; triangle-expanded
+    vertices: np.ndarray  # position3, normal3, uv2, color4
+    indices: np.ndarray   # uint16 triangles in original draw order
     material: PreviewMaterial
     skinned: bool = False
 
@@ -410,8 +418,13 @@ def load_scene(path, converted_root='', source_root='', cancel=None):
             if attributes & 32:
                 colors = np.ndarray((vertices, 4), dtype='u1', buffer=raw, offset=((descriptor >> 24)&15)*4, strides=(stride, 1)).astype(np.float32) / 255.
             material = _shader_material(nif, shader, resolver, materials, images, diagnostics, cancel)
-            packed = np.column_stack((positions, normal, uv, colors)).astype(np.float32)[indices.reshape(-1)]
-            meshes.append(PreviewMesh(name or ('Shape ' + str(index)), np.ascontiguousarray(packed), material, skin != -1))
+            packed = np.empty((vertices, 12), dtype=np.float32)
+            packed[:, :3] = positions
+            packed[:, 3:6] = normal
+            packed[:, 6:8] = uv
+            packed[:, 8:] = colors
+            # Detach just the indices so the scene can release the original NIF block.
+            meshes.append(PreviewMesh(name or ('Shape ' + str(index)), packed, indices.copy(), material, skin != -1))
         active.remove(index)
     for root in nif.roots: walk(root, np.eye(4))
     check_cancel(cancel)

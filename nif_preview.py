@@ -4,14 +4,16 @@ import math
 import threading
 from pathlib import Path
 import numpy as np
-from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QImage, QMatrix4x4, QVector3D, QVector4D, QSurfaceFormat
+from shiboken6 import VoidPtr
+from PySide6.QtCore import Qt, QEvent, QThread, Signal
+from PySide6.QtGui import QImage, QMatrix4x4, QVector3D, QVector4D, QSurfaceFormat, QOpenGLContext, QPixmap
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                              QLineEdit, QFileDialog, QComboBox, QCheckBox, QPlainTextEdit)
-from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtOpenGL import QOpenGLShaderProgram, QOpenGLShader, QOpenGLBuffer, QOpenGLTexture
+                              QLineEdit, QFileDialog, QComboBox, QCheckBox, QPlainTextEdit, QStackedLayout)
+from PySide6.QtOpenGL import QOpenGLWindow, QOpenGLShaderProgram, QOpenGLShader, QOpenGLBuffer, QOpenGLTexture
 import i18n
 from preview_process import load_scene_isolated
+
+_ELEMENT_OFFSET_ZERO = VoidPtr(0)
 
 VERTEX_SHADER = '''
 #version 120
@@ -128,19 +130,18 @@ class LoadWorker(QThread):
         except Exception as exc:
             if not self.cancel_event.is_set(): self.failed.emit(str(exc))
 
-class NifViewport(QOpenGLWidget):
+class NifViewport(QOpenGLWindow):
     render_error = Signal(str)
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    file_dropped = Signal(str)
+    def __init__(self):
+        super().__init__()
         format = QSurfaceFormat()
         format.setVersion(2, 1)
         format.setProfile(QSurfaceFormat.OpenGLContextProfile.NoProfile)
         format.setDepthBufferSize(24)
         format.setSamples(4)
         self.setFormat(format)
-        self.setMinimumSize(320, 220)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.scene = None
         self._program = None
         self._gpu = []
@@ -150,7 +151,15 @@ class NifViewport(QOpenGLWidget):
         self._yaw, self._pitch, self._zoom = 158., -10., 1.
         self._last = None
         self.mode, self.vertex_colors = 0, False
-    def sizeHint(self): return QSize(850, 430)
+    def event(self, event):
+        if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and url.toLocalFile().lower().endswith('.nif'):
+                    event.acceptProposedAction()
+                    if event.type() == QEvent.Type.Drop:
+                        self.file_dropped.emit(url.toLocalFile())
+                    return True
+        return super().event(event)
     def set_scene(self, scene):
         self.scene = scene
         self._error = ''
@@ -178,12 +187,14 @@ class NifViewport(QOpenGLWidget):
             self._error = 'OpenGL preview unavailable: ' + str(exc)
             self.render_error.emit(self._error)
     def _clear_resources(self):
-        for buffer, _, _, _ in self._gpu: buffer.destroy()
+        for vertices, indices, _, _, _ in self._gpu:
+            vertices.destroy()
+            indices.destroy()
         self._gpu.clear()
         for texture in self._textures.values(): texture.destroy()
         self._textures.clear()
     def release_gl(self):
-        if self.context() is None: return
+        if not self.isValid(): return
         self.makeCurrent()
         self._clear_resources()
         if self._program is not None:
@@ -196,14 +207,19 @@ class NifViewport(QOpenGLWidget):
             self._pending_upload = False
             return
         for mesh in self.scene.meshes:
-            buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
-            if not buffer.create(): raise RuntimeError('Could not create vertex buffer')
-            buffer.bind()
-            raw = mesh.vertices.tobytes()
-            buffer.allocate(raw, len(raw)); buffer.release()
+            vertices = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+            indices = QOpenGLBuffer(QOpenGLBuffer.Type.IndexBuffer)
             fields = mesh.material.fields
             transparent = bool(fields.get('AlphaBlend0')) or float(fields.get('Alpha',1.0)) < 1
-            self._gpu.append((buffer, len(mesh.vertices), mesh.material, transparent))
+            self._gpu.append((vertices, indices, mesh.indices.size, mesh.material, transparent))
+            for buffer, array in ((vertices, mesh.vertices), (indices, mesh.indices)):
+                if not buffer.create() or not buffer.bind():
+                    raise RuntimeError('Could not create or bind preview geometry buffer')
+                buffer.allocate(array.tobytes(), array.nbytes)
+                if buffer.size()!=array.nbytes:
+                    buffer.release()
+                    raise RuntimeError('Insufficient GPU memory for preview geometry')
+                buffer.release()
             for key, pixels in mesh.material.textures.values():
                 if key in self._textures: continue
                 h, w = pixels.shape[:2]
@@ -212,15 +228,20 @@ class NifViewport(QOpenGLWidget):
                 texture.setMinMagFilters(QOpenGLTexture.Filter.LinearMipMapLinear, QOpenGLTexture.Filter.Linear)
                 texture.setWrapMode(QOpenGLTexture.WrapMode.Repeat)
                 self._textures[key] = texture
+        self._gpu.sort(key=lambda part: part[4])  # Opaque draws precede blended ones.
         self._pending_upload = False
     def paintGL(self):
         if not hasattr(self, '_functions'): return
         f = self._functions
         f.glClearColor(.075, .082, .091, 1.)
         f.glClear(0x4000 | 0x0100)
-        if self._program is None: return
+        if self._program is None or self._error: return
         try:
-            if self._pending_upload: self._upload()
+            if self._pending_upload:
+                try: self._upload()
+                except Exception:
+                    self._clear_resources()
+                    raise
             if self.scene is None: return
             f.glEnable(0x0B71)  # DEPTH_TEST
             f.glDisable(0x0B44)  # cull: inspect both sides, no missing thin glass
@@ -242,7 +263,7 @@ class NifViewport(QOpenGLWidget):
             uniform('uMode', self.mode)
             uniform('uVertexColor', int(self.vertex_colors))
             for index, name in enumerate(('uBase','uNormal','uSpec','uGlow')): uniform(name,index)
-            for buffer, count, material, transparent in sorted(self._gpu,key=lambda v:v[3]):
+            for buffer, indices, count, material, transparent in self._gpu:
                 fields = material.fields
                 if transparent:
                     f.glEnable(0x0BE2); f.glBlendFunc(0x0302,0x0303); f.glDepthMask(False)
@@ -269,12 +290,15 @@ class NifViewport(QOpenGLWidget):
                 uniform('uModelSpace',int(bool(fields.get('ModelSpaceNormals'))))
                 uniform('uUseAlpha',int(transparent or bool(fields.get('AlphaTest'))))
                 uniform('uAlphaTest',float(fields.get('AlphaTestRef',128))/255. if fields.get('AlphaTest') else 0.)
-                buffer.bind()
+                if not buffer.bind(): raise RuntimeError('Could not bind preview vertex buffer')
                 for name, offset, size in (('aPosition',0,3),('aNormal',12,3),('aUV',24,2),('aColor',32,4)):
                     location = p.attributeLocation(name)
                     p.enableAttributeArray(location)
                     p.setAttributeBuffer(location,0x1406,offset,size,48)
-                f.glDrawArrays(0x0004,0,count)
+                # A bound element buffer makes the final argument a byte offset.
+                if not indices.bind(): raise RuntimeError('Could not bind preview index buffer')
+                f.glDrawElements(0x0004,count,0x1403,_ELEMENT_OFFSET_ZERO)  # GL_TRIANGLES, GL_UNSIGNED_SHORT
+                indices.release()
                 buffer.release()
             p.release()
             f.glDepthMask(True); f.glDisable(0x0BE2)
@@ -339,7 +363,29 @@ class NifPreviewPanel(QWidget):
         self.toolbar.addWidget(self.mode_combo); self.toolbar.addWidget(self.vertex_check); self.toolbar.addStretch(); self.toolbar.addWidget(self.help_label); self.toolbar.addWidget(self.fit_button)
         layout.addLayout(self.toolbar)
         self.viewport=NifViewport(); self.viewport.render_error.connect(self._render_error)
-        layout.addWidget(self.viewport,1)
+        self.viewport.file_dropped.connect(self.open_nif)
+        # A native GL child keeps the converter's existing raster window intact.
+        # Inserting a first QOpenGLWidget here would destroy and recreate its HWND.
+        self.viewport_stack = QStackedLayout()
+        self.viewport_still = QLabel()
+        self.viewport_still.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.viewport_still.setWordWrap(True)
+        self.viewport_still.setMinimumSize(320, 220)
+        self.viewport_still.setStyleSheet("background:#141517;color:#e5e2d8;")
+        self.viewport_stack.addWidget(self.viewport_still)
+        probe = QOpenGLContext()
+        probe.setFormat(self.viewport.requestedFormat())
+        self.viewport_container = None
+        if probe.create() and probe.isValid():
+            self.viewport_container = QWidget.createWindowContainer(self.viewport, self)
+            self.viewport_container.setMinimumSize(320, 220)
+            self.viewport_container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self.viewport_stack.addWidget(self.viewport_container)
+            self.viewport_stack.setCurrentWidget(self.viewport_container)
+        else:
+            for widget in (self.fit_button, self.mode_combo, self.vertex_check):
+                widget.setEnabled(False)
+        layout.addLayout(self.viewport_stack,1)
         self.status_label=QLabel(); self.status_label.setWordWrap(True); layout.addWidget(self.status_label)
         self.disclaimer=QLabel(); self.disclaimer.setWordWrap(True); self.disclaimer.setStyleSheet('color:#8a8983;font-size:11px;'); layout.addWidget(self.disclaimer)
         self.details_button=QPushButton(); self.details_button.setCheckable(True); self.details_button.setChecked(False)
@@ -348,6 +394,9 @@ class NifPreviewPanel(QWidget):
         self.details=QPlainTextEdit(); self.details.setReadOnly(True); self.details.setMaximumHeight(110); self.details.hide(); layout.addWidget(self.details)
         self.retranslate()
     def retranslate(self):
+        if self.viewport_container is None:
+            self.viewport_still.setText(_text('无法创建 OpenGL 预览。仍可打开模型查看材质与贴图诊断。',
+                'OpenGL preview is unavailable. Open a model to inspect its material and texture diagnostics.'))
         self.open_button.setText(_text('选择 NIF','Open NIF'))
         self.open_button.setToolTip(_text('从电脑读取 NIF 模型，所有文件仅在本地处理。','Read a local NIF model. Files stay on your computer.'))
         self.reload_button.setText(_text('重新加载','Reload')); self.reload_button.setToolTip(_text('按当前资源目录重新读取模型与材质。','Reload geometry and materials from the selected roots.'))
@@ -356,7 +405,7 @@ class NifPreviewPanel(QWidget):
         self.source_label.setText(_text('原资源目录（备用）','Source fallback'))
         self.converted_edit.setPlaceholderText(_text('选择含 materials / textures 的转换结果目录','Folder containing converted materials / textures'))
         self.source_edit.setPlaceholderText(_text('缺失资源时使用；不会修改原文件','Used only for missing assets; source files remain unchanged'))
-        for widget in (self.converted_edit,self.converted_pick):widget.setToolTip(_text('优先读取此目录。可选择一次转换的运行目录或 converted 文件夹。','Priority root. Choose a conversion run directory or its converted folder.'))
+        for widget in (self.converted_edit,self.converted_pick):widget.setToolTip(_text('优先读取导出根目录中的 materials 和 textures。旧版运行目录也可以直接选择。','Load materials and textures from the shared export root first. Legacy run folders are also supported.'))
         for widget in (self.source_edit,self.source_pick):widget.setToolTip(_text('转换结果缺少引用时在此查找；诊断中标明备用来源。','Fallback for missing references; diagnostics identify fallback assets.'))
         for i,(zh,en) in enumerate((('材质光照','Material lighting'),('基础颜色','Base color'),('表面法线','Surface normals'))):self.mode_combo.setItemText(i,_text(zh,en))
         self.mode_combo.setToolTip(_text('切换材质光照、基础颜色或法线检查。','Inspect lighting, base color, or surface normals.'))
@@ -394,6 +443,16 @@ class NifPreviewPanel(QWidget):
         if self.is_busy(): return False
         self.converted_edit.setText(str(converted_root or '')); self.source_edit.setText(str(source_root or ''))
         return self._resource_roots_edited()
+    def reload_after_export(self, output_root):
+        if not self._path or not output_root or self.is_busy():
+            return
+        try:
+            same_root = Path(self.converted_edit.text()).resolve() == Path(output_root).resolve()
+        except (ValueError, OSError):
+            return
+        if same_root:
+            self.open_nif(self._path)
+
     def is_busy(self): return self._worker is not None
     def cancel(self):
         if self._worker is not None:
@@ -403,6 +462,21 @@ class NifPreviewPanel(QWidget):
         self._shutting_down = True
         if self.is_busy(): self.cancel(); return False
         self.viewport.release_gl(); return True
+    def freeze_for_close(self):
+        if self.viewport_container is None or not self.viewport_container.isVisible():
+            return
+        if self.viewport.isValid():
+            frame = self.viewport.grabFramebuffer()
+            if not frame.isNull():
+                picture = QPixmap.fromImage(frame)
+                picture.setDevicePixelRatio(self.viewport.devicePixelRatio())
+                self.viewport_still.setPixmap(picture)
+        self.viewport_stack.setCurrentWidget(self.viewport_still)
+
+    def restore_viewport(self):
+        if self.viewport_container is not None:
+            self.viewport_stack.setCurrentWidget(self.viewport_container)
+            self.viewport_still.clear()
     def _choose_nif(self):
         path,_=QFileDialog.getOpenFileName(self,_text('选择模型','Open model'),self._path,'NIF (*.nif)')
         if path:self.open_nif(path)

@@ -9,6 +9,7 @@ import os
 from PySide6.QtCore import QObject, QEvent, QPoint, QPointF, QRectF, Qt, Signal, QVariantAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget, QApplication
+from config import APP_AUTHOR, APP_VERSION
 import ui_theme as T
 
 
@@ -199,7 +200,7 @@ class _StartupOverlay(QWidget):
             p.drawText(QRectF(36,cy-40+18*(1-title_progress),w-72,70),Qt.AlignCenter,self.title);p.restore()
             p.save();p.setClipRect(QRectF(36,cy+40,(w-72)*_out(_unit(t,510,710)),30))
             p.setFont(self._small_font);p.setPen(QColor(T.MOTION_INK))
-            p.drawText(QRectF(36,cy+41,w-72,24),Qt.AlignCenter,'ALPHA 1.0  /  '+self.author);p.restore()
+            p.drawText(QRectF(36,cy+41,w-72,24),Qt.AlignCenter,f'{APP_VERSION}  /  {self.author}');p.restore()
             align=_out(_unit(t,390,640))
             p.save();p.translate(cx,cy-90-10*(1-align));p.rotate(12*(1-align))
             p.setOpacity(align)
@@ -245,7 +246,7 @@ class MotionController(QObject):
     shutdown_finished=Signal()
     shutdown_failed=Signal(str)
 
-    def __init__(self,window,content=None,*,title='TEXTURE CONVERTER',author='private0516',reduced_motion=None):
+    def __init__(self,window,content=None,*,title='TEXTURE CONVERTER',author=APP_AUTHOR,reduced_motion=None):
         super().__init__(window)
         self.window=window;self.content=content or window.centralWidget()
         if self.content is None:raise ValueError('MotionController requires the main content widget')

@@ -1,6 +1,12 @@
 # Security / 安全说明
 
-Revision: security-hardening-20261117 · ALPHA 1.0 · private0516
+Revision: v1.0 · Private0516
+
+对预览进程返回的数组格式、偏移及载荷做一致性校验。材质 JSON 仅接受匹配编辑器格式的单层对象。偏好设置采用原子保存。
+
+检查预览索引和总量限制，固定输入文件和报告目录的句柄，复核复制的外部贴图并使用独占方式创建报告。
+
+共享根目录仅发布游戏资源。关闭报告时命令行不保留启动器转录。
 
 ## Scope / 范围
 
@@ -44,6 +50,6 @@ Python 运行时保留 3.12.14，其版本及来源会记录在 BUILD_PROVENANCE
 
 ## Reports / 问题报告
 
-报告时注明工具名称、ALPHA 1.0、上述 revision、操作步骤和预期/实际结果；优先提供不含游戏资源或私人路径的最小合成样本。日志、配置和转换报告可能包含本地路径，分享前请检查。不要把包含私人信息的文件直接贴到公开 issue。
+报告时注明工具名称、版本和上述 revision、操作步骤和预期/实际结果；优先提供不含游戏资源或私人路径的最小合成样本。日志、配置和转换报告可能包含本地路径，分享前请检查。不要把包含私人信息的文件直接贴到公开 issue。
 
 English: This revision bounds untrusted input and resource use, strengthens output publication, isolates preview failures, and improves launcher process/log handling. Processes still run as the current user, not in an OS security sandbox. The custom launchers remain unsigned and the bundled CPython remains 3.12.14. Verified download hashes detect changes relative to the published manifest but do not authenticate a replaced manifest. Source, pinned dependencies and third-party notices are provided for review; no safety certification is claimed.

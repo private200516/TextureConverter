@@ -40,8 +40,9 @@ def match_size(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """把两张图缩放到相同尺寸（取较大者，避免丢细节）。"""
     if a.shape[:2] == b.shape[:2]:
         return a, b
-    th = max(a.shape[0], b.shape[0])
-    tw = max(a.shape[1], b.shape[1])
+    # Choose an existing grid; independent axis maxima can turn two thin
+    # crossed maps into a huge intermediate absent from the DDS memory budget.
+    th, tw = max((a.shape[:2], b.shape[:2]), key=lambda hw: hw[0] * hw[1])
 
     def resize(x):
         if x.shape[0] == th and x.shape[1] == tw:
@@ -73,61 +74,121 @@ def invert_green_channel(rgba: np.ndarray) -> np.ndarray:
     return out
 
 
-def build_specular(l_rgba: np.ndarray, r_rgba: np.ndarray) -> np.ndarray:
-    """
-    _l + _r → _s
-      _s.R = _r 的灰度 Reflectance（Rec.709）
-      _s.G = _l.R Smoothness
-      _s.B = 0
-      _s.A = 255
-    """
-    l_rgba, r_rgba = match_size(l_rgba, r_rgba)
-    # Identical Rec.709 operation order/float64 rounding, without expanding
-    # four unused lighting channels or a full float64 RGBA output.
-    r = r_rgba[..., :3].astype(np.float64) / 255.0
-    luminance = luminance709(r)
-    s = np.empty_like(l_rgba)
-    s[..., 0] = np.clip(np.round(luminance * 255.0), 0, 255).astype(np.uint8)
-    s[..., 1] = l_rgba[..., 0]
-    s[..., 2] = 0
-    s[..., 3] = 255
-    return s
+def _resample_data(pixels, shape):
+    """Resample only a scalar plane or RGB channels, independently of other slots."""
+    if pixels.shape[:2] == shape:
+        return pixels
+    height, width = shape
+    return np.asarray(Image.fromarray(pixels).resize((width, height), Image.Resampling.LANCZOS))
+
+
+def build_specular(l_rgba: np.ndarray, r_rgba: np.ndarray, *, cancel_event=None) -> np.ndarray:
+    """Pack reflectance luminance and smoothness into the two FO4 channels."""
+    if cancel_event is not None:
+        from dds import _check_cancel
+        _check_cancel(cancel_event)
+    shape = max((l_rgba.shape[:2], r_rgba.shape[:2]), key=lambda hw: hw[0] * hw[1])
+    smoothness = _resample_data(l_rgba[..., 0], shape)
+    reflectance = _resample_data(r_rgba[..., :3], shape)
+    result = np.empty((*shape, 4), dtype=np.uint8)
+    rows = max(1, 65536 // shape[1])
+    for y in range(0, shape[0], rows):
+        if cancel_event is not None:
+            _check_cancel(cancel_event)
+        band = slice(y, y + rows)
+        color = reflectance[band].astype(np.float64) / 255.
+        result[band, :, 0] = to_uint8(luminance709(color))
+    result[..., 1] = smoothness
+    result[..., 2] = 0
+    result[..., 3] = 255
+    return result
 
 
 def apply_ao_to_diffuse(diffuse: np.ndarray, l_rgba: np.ndarray,
-                        strength: float) -> np.ndarray:
-    """AO → Diffuse：Diffuse = Diffuse × lerp(1, AO, strength)。AO 取 _l.G。"""
-    diffuse, l_rgba = match_size(diffuse, l_rgba)
-    df = to_float(diffuse)
-    ao = to_float(l_rgba)[..., 1]
-    factor = 1.0 + (ao - 1.0) * float(np.clip(strength, 0.0, 1.0))
-    out = df.copy()
-    out[..., 0] *= factor
-    out[..., 1] *= factor
-    out[..., 2] *= factor
-    return to_uint8(out)
+                        strength: float, *, cancel_event=None) -> np.ndarray:
+    """Bake _l.G onto the original diffuse grid and retain its coverage alpha."""
+    if cancel_event is not None:
+        from dds import _check_cancel
+        _check_cancel(cancel_event)
+    amount = float(strength)
+    if not np.isfinite(amount) or not 0 <= amount <= 1:
+        raise ValueError('AO strength must be finite and between zero and one')
+    out = diffuse.copy()
+    if not amount:
+        return out
+    ao = _resample_data(l_rgba[..., 1], diffuse.shape[:2])
+    rows = max(1, 65536 // diffuse.shape[1])
+    for y in range(0, diffuse.shape[0], rows):
+        if cancel_event is not None:
+            _check_cancel(cancel_event)
+        band = slice(y, y + rows)
+        factor = 1. + (ao[band].astype(np.float64) / 255. - 1.) * amount
+        color = diffuse[band, :, :3].astype(np.float64) / 255.
+        out[band, :, :3] = to_uint8(color * factor[..., None])
+    return out
+
+
+def _smooth_ramp(value, low, high):
+    t = np.clip((value - low) / (high - low), 0., 1.)
+    return t * t * (3. - 2. * t)
 
 
 def apply_metal_compensation(diffuse: np.ndarray, r_rgba: np.ndarray,
-                             strength: float) -> np.ndarray:
-    """
-    自动金属补偿（渐进式混合，绝不用 _r 整体覆盖 _d）。
+                             strength: float, *, reflectance_format='',
+                             diffuse_format='', source_diffuse=None, cancel_event=None) -> np.ndarray:
+    """Restore dark metal diffuse samples using the paired FO76 reflectance.
 
-    疑似金属区域判定：Reflectance 亮度（Rec.709）越高的区域越可能是金属。
-    mask = smoothstep(0.25, 0.75, reflectance_luma)
-    输出 = lerp(diffuse, max(diffuse, reflectance_color), mask × strength)
+    BC4/R8 stores scalar reflectance. An explicitly sRGB diffuse can use a
+    neutral, bounded display-space target. RGB maps retain their authored tint.
+    All weights taper away at already-bright paint and weak reflections.
     """
-    diffuse, r_rgba = match_size(diffuse, r_rgba)
-    df = to_float(diffuse)
-    rf = to_float(r_rgba)[..., :3]
-    luma = luminance709(rf)
-    t = np.clip((luma - 0.25) / 0.5, 0.0, 1.0)
-    mask = t * t * (3.0 - 2.0 * t) * float(np.clip(strength, 0.0, 1.0))
-    target = np.maximum(df[..., :3], rf)
-    out = df.copy()
-    for c in range(3):
-        out[..., c] = df[..., c] * (1.0 - mask) + target[..., c] * mask
-    return to_uint8(out)
+    strength = float(strength)
+    if not np.isfinite(strength) or not 0 <= strength <= 1:
+        raise ValueError('Metal strength must be finite and between zero and one')
+    if source_diffuse is not None and source_diffuse.shape != diffuse.shape:
+        raise ValueError('Source diffuse and AO-adjusted diffuse grids must match')
+    out = diffuse.copy()
+    if not strength:
+        return out
+    height, width = diffuse.shape[:2]
+    scalar = reflectance_format in ('BC4_UNORM', 'R8_UNORM')
+    paired_scalar = scalar and diffuse_format.endswith('_SRGB')
+    if r_rgba.shape[:2] != (height, width):
+        # Numeric or RGB data: unused alpha must not premultiply the samples.
+        source = r_rgba[..., 0] if scalar else r_rgba[..., :3]
+        reflectance = np.asarray(Image.fromarray(source).resize(
+            (width, height), Image.Resampling.BILINEAR))
+    else:
+        reflectance = r_rgba[..., 0] if scalar else r_rgba[..., :3]
+
+    # Keep peak float workspace proportional to a strip, including for 2K+ DDS.
+    rows = max(1, 65536 // width)
+    for y in range(0, height, rows):
+        if cancel_event is not None:
+            from dds import _check_cancel
+            _check_cancel(cancel_event)
+        band = slice(y, y + rows)
+        color = diffuse[band, :, :3].astype(np.float32) / 255.
+        r = reflectance[band].astype(np.float32) / 255.
+        level = r if scalar else luminance709(r)
+        # AO darkens paint as well as metal. Determine eligibility from the authored diffuse.
+        peak = (color.max(axis=2) if source_diffuse is None else
+                source_diffuse[band, :, :3].max(axis=2).astype(np.float32) / 255.)
+        dark = 1. - _smooth_ramp(peak, 32. / 255., 74. / 255.)
+        if paired_scalar:
+            # Matched ordinary BGSMs include blackened metal at 50–75/255
+            # scalar reflectance. A broad shoulder limits mirror-bright inputs.
+            reflective = _smooth_ramp(level, 32. / 255., 63. / 255.)
+            target_linear = np.minimum(r, .32)
+            target = np.where(target_linear <= .0031308, 12.92 * target_linear,
+                              1.055 * target_linear ** (1. / 2.4) - .055)[..., None]
+        else:
+            reflective = _smooth_ramp(level, .25, .75)
+            target = r[..., None] if scalar else r
+        weight = dark * reflective * strength * (diffuse[band, :, 3] > 0)
+        color += np.maximum(0., target - color) * weight[..., None]
+        out[band, :, :3] = np.rint(color * 255.).astype(np.uint8)
+    return out
 
 
 def build_glow_from_l_alpha(l_rgba: np.ndarray) -> np.ndarray:

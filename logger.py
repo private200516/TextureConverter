@@ -38,17 +38,19 @@ class ConversionLog:
     _stream: object = field(default=None, repr=False)
     _stream_path: str | None = field(default=None, repr=False)
     total_entries: int = 0
+    output_dir: str | None = None
+    report_dir: str | None = None
 
     def __post_init__(self):
         self.entries = deque(self.entries, maxlen=self.max_entries)
 
-    def start_stream(self, path: str) -> None:
+    def start_stream(self, path: str, *, exclusive=False) -> None:
         """Keep the full batch log on disk while retaining only a recent RAM window."""
         with self._lock:
             if self._stream is not None:raise RuntimeError("Log stream already open")
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             self._stream_path=os.path.abspath(path)
-            self._stream=open(path,"w",encoding="utf-8",buffering=65536)
+            self._stream=open(path,"x" if exclusive else "w",encoding="utf-8",buffering=65536)
             self._stream.write(tr("log_file_title")+"\n")
             self._stream.write(f"{tr('log_file_time')}: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             self._stream.write("="*60+"\n\n")

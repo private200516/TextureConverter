@@ -53,6 +53,58 @@ class PipelineTests(unittest.TestCase):
         self.mat=Material('BGSM',22,dict(DiffuseTexture='textures/odd_color.dds',SpecularTexture='textures/odd_reflection.dds',LightingTexture='textures/odd_lighting.dds',SpecularEnabled=True))
         (self.src/'materials/a.bgsm').write_bytes(serialize(self.mat))
     def tearDown(self):self.temp.cleanup()
+    def test_effect_keeps_authored_mask_and_never_invents_a_packed_map(self):
+        textures = self.src/'textures'
+        mask = textures/'effect_mask.dds'
+        mask.write_bytes((textures/'odd_color.dds').read_bytes())
+        material_file = self.src/'materials/effect.bgem'
+        for mask_path in ('textures/effect_mask.dds', ''):
+            with self.subTest(mask=mask_path):
+                material_file.write_bytes(serialize(Material('BGEM',22,dict(
+                    BaseTexture='textures/odd_color.dds', EnvmapMaskTexture=mask_path,
+                    LightingTexture='textures/odd_lighting.dds', SpecularTexture='textures/odd_reflection.dds'))))
+                job, = scan_jobs(material_file)
+                out = self.out/('with-mask' if mask_path else 'no-mask')
+                result = run_job(job,out,options={'texconv_path':False,'diffuse_fmt':'BC3_UNORM'})
+                effect = parse(out/'materials/effect.bgem')
+                self.assertEqual(effect.fields['EnvmapMaskTexture'], mask_path)
+                self.assertEqual(set(result['source_headers']), {'d'})
+                self.assertFalse(list(out.rglob('*_s.dds')))
+                if mask_path:
+                    self.assertEqual((out/mask_path).read_bytes(), mask.read_bytes())
+
+    def test_effect_cache_hit_still_checks_current_external_dependency(self):
+        mask = self.src/'textures/mask.dds'
+        mask.write_bytes((self.src/'textures/odd_color.dds').read_bytes())
+        effect = serialize(Material('BGEM',22,{'BaseTexture':'textures/odd_color.dds','EnvmapMaskTexture':'textures/mask.dds'}))
+        for label in ('first','second'):
+            (self.src/'materials'/(label+'.bgem')).write_bytes(effect)
+        jobs = [j for j in scan_jobs(self.src/'materials') if j.get('material_kind')=='BGEM']
+        cfg = Config(input_dir=str(self.src),output_dir=str(self.out),metal_options={'texconv_path':False})
+        def progress(done,total,label):
+            if done==1:mask.unlink(missing_ok=True)
+        log=run_jobs(jobs,cfg,progress_cb=progress)
+        self.assertEqual((log.ok,log.errors), (1,1))
+        report=json.loads((Path(log.report_dir)/'report.json').read_bytes())
+        self.assertIn('missing EnvmapMaskTexture',report['results'][1]['error'])
+
+    def test_dependency_updated_after_copy_is_not_committed(self):
+        import texture_api
+        mask = self.src/'textures/mask.dds'
+        mask.write_bytes((self.src/'textures/odd_color.dds').read_bytes())
+        src=self.src/'materials/effect.bgem'
+        src.write_bytes(serialize(Material('BGEM',22,{'EnvmapMaskTexture':'textures/mask.dds'})))
+        job,=scan_jobs(src)
+        copy=texture_api._copy_file
+        def change_after_copy(source,target,cancel):
+            actual=copy(source,target,cancel)
+            if Path(source)==mask:mask.write_bytes(mask.read_bytes()+b'changed')
+            return actual
+        with patch('texture_api._copy_file',side_effect=change_after_copy):
+            with self.assertRaisesRegex(ValueError,'Source changed during conversion'):
+                run_job(job,self.out,options={'texconv_path':False})
+        self.assertFalse(list(self.out.rglob('*.bgem')))
+
     def test_slots_win_over_suffix_and_preview_alpha(self):
         jobs=scan_jobs(self.src);self.assertEqual(len(jobs),1);self.assertEqual(set(jobs[0]['texture_paths']),{'d','r','l'})
         result=preview_job(jobs[0],{'mode':'auto','color_contract_override':'linear_linear'})
@@ -80,15 +132,15 @@ class PipelineTests(unittest.TestCase):
         cfg=Config(input_dir=str(self.src),output_dir=str(self.out),metal_mode='manual',metal_options={'color_contract_override':'linear_linear','allow_experimental':True,'manual_mask':np.ones((8,8)),'texconv_path':False,'diffuse_fmt':'BC3_UNORM'})
         cfg.job_overrides={jobs[1]['id']:{'reconstruction_strength':.2}}
         log=run_jobs(jobs,cfg);self.assertEqual(log.errors,0)
-        run=Path(log.output_dir)/'converted';a=parse(run/'materials/a.bgsm');b=parse(run/'materials/b.bgsm')
+        run=Path(log.output_dir);a=parse(run/'materials/a.bgsm');b=parse(run/'materials/b.bgsm')
         self.assertNotEqual(a.fields['DiffuseTexture'],b.fields['DiffuseTexture'])
-        again=run_jobs(jobs,cfg);a2=parse(Path(again.output_dir)/'converted/materials/a.bgsm')
+        again=run_jobs(jobs,cfg);self.assertEqual(again.errors,0);a2=parse(Path(again.output_dir)/'materials/a.bgsm')
         self.assertEqual(a2.fields['DiffuseTexture'],a.fields['DiffuseTexture'])
     def test_cache_reuses_identical_committed_textures(self):
         (self.src/'materials/b.bgsm').write_bytes(serialize(self.mat));jobs=scan_jobs(self.src)
         cfg=Config(input_dir=str(self.src),output_dir=str(self.out),metal_mode='off',metal_options={'texconv_path':False})
         log=run_jobs(jobs,cfg);self.assertEqual(log.errors,0)
-        results=json.loads((Path(log.output_dir)/'reports/report.json').read_text())['results']
+        results=json.loads((Path(log.report_dir)/'report.json').read_text())['results']
         self.assertFalse(results[0].get('texture_cache_reused',False));self.assertTrue(results[1]['texture_cache_reused'])
     def test_cancel_during_encode_cleans_group(self):
         import texture_api

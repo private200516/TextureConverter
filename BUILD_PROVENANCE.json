@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "product": "TextureConverter",
-  "public_version": "ALPHA 1.0",
-  "revision": "logo-refinement-release-20261117",
+  "public_version": "1.0",
+  "revision": "v1.0",
   "logo": {
     "source": "assets/toolkit-logo.png",
     "png_sha256": "31d8430db3b46afc4d30f1608935018eb7ef439021d8ff3c6a032c6201ddc35c",
@@ -10,7 +10,7 @@
     "png_bytes_unchanged": true,
     "icon_sha256": "1ed911cbd79280f2251d2f1db39034cd16b7701573551367c23e99cf14a0c782"
   },
-  "author": "private0516",
+  "author": "Private0516",
   "project_license": "GPL-3.0",
   "development_disclosure": "GPT-6 Astra; AI-generated code and UI",
   "python": {
@@ -22,9 +22,9 @@
   },
   "launcher": {
     "source": "TextureLauncher.cs",
-    "source_sha256": "e4b9377eeaf2bddf0b830aaa14c0e7f3c6c2365535c3554b77cd378a152f7cbd",
+    "source_sha256": "a6da42fc89b5c98b74415bef34731ffdcffe45ad06aa0e84e74770ff394f60ef",
     "manifest_sha256": "367204376d2270c46d8e6c3e6eef10b2d08d63e5d84d257cf40e6ea1df647f59",
-    "exe_sha256": "171a2e84a852e70a2b350e012940ffaa25993688192ce64a773b6e17d9637dc3",
+    "exe_sha256": "538b427c3cb1c03a8f668177af598a644dc19a2813b7cff62fc47e83d8f285cc",
     "compiler": "Windows .NET Framework v4 x64 C# compiler",
     "compiler_sha256": "eca02e6b15cde93009a59a3d129d5a77fb5008f2e1cf62cf573b6737c747ecc3",
     "build_script": "tools/build_launcher.ps1",
@@ -2446,5 +2446,25 @@
     "version": "2026.5.8.1",
     "sha256": "dcfdec10244e02cf5037fba089c55fb7e1326b1c8181742d77d15fa5cb5eef06",
     "baseline_authenticode": "Valid Microsoft signature"
+  },
+  "local_application_changes": {
+    "app_motion.py": "9678c5a16d7da96ea01b01050fbe6632f16fe1c6f4a9d87d1e497675243b983d",
+    "config.py": "26947c6f4ea9b7b2aa06df2a6f1e2d5adcee5f07450c051a0ca39e104576ebde",
+    "converter.py": "3af8e68676d01da949cbaddd4edb3a0019320760b21a5fcc668fef308a81021d",
+    "dds.py": "f597deb2c1032848a83fdfc2e5739c21712d6dc520b8d1d97cc9deac31919f01",
+    "i18n.py": "c67c5f7578fa84872802cb700d9bc943ce9a714ce03e736d13a79583c31aa61f",
+    "logger.py": "3a6cbb5bb0d27b981302ff237a53d6df052bb2a7348aaa64fe8a18699760a806",
+    "main.py": "9f907355756345ce9d78268a3fa0f442e29de3e81f0be5d955c44cfc30bc717b",
+    "material.py": "bf1f749c54fd0ce8eacfc2ddf0c54a7d6ae2d2e9bb45c3f5bc3fe40b9133ae10",
+    "material_codec.py": "6d9f4da254ebf80bdbe475ce738f1c0237891b737fb6614db609a83726a18a23",
+    "material_converter.py": "82007a7a645c255605f1661e42f0d55daac2b10a7591c2212974d28c57fb2a7a",
+    "material_jobs.py": "fbc0c889e36668262e491594807285ac23389d56e13e51825f0694c86301d8c0",
+    "metal_reconstruction.py": "a9d76517d3ec205bc5f286421c9e770a789d99d3c0f347e9d48561dbdebc5dde",
+    "nif_preview.py": "a10e5081298350e8b6d6782fdecb64706a40ee9225be3ef015aaf04c2512504a",
+    "nif_preview_data.py": "e1941bb442a85c336cd93f13760d7be89024c76116a6af7e588769719a0d9e95",
+    "preview_process.py": "7f86db5807476caabb00846925b1457a63c6fc16d1ef3dbb26d122a8027d8aab",
+    "security_io.py": "5b5d2e973f42c89509a0fab0cd8d2fcac461bdebd4467008a9dc1f158104148e",
+    "texture_api.py": "d37c426b26d408402b316852b7a9c2eca97bae8d0a6cc54f3c0a4c27b0b3dba5",
+    "texture_cli.py": "a4897e7930af785a2555c087c921c144bb1ed486805293def85d69f0731c855e"
   }
 }

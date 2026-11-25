@@ -47,8 +47,8 @@ class MainMotionIntegrationTests(unittest.TestCase):
         self.assertFalse(self.w.statusbar._timer.isActive());self.assertFalse(self.w.logview._timer.isActive())
         self.assertFalse(self.w.banner._timer.isActive())
         self.w.showNormal();QTest.qWait(60);self.assertTrue(self.w.statusbar._timer.isActive())
-    def test_four_tabs_and_bilingual_accordion_titles_fit(self):
-        self.w.show();self.assertEqual(self.w.tabs.count(),4);self.assertEqual(self.w.tabs.currentIndex(),0)
+    def test_five_tabs_and_bilingual_accordion_titles_fit(self):
+        self.w.show();self.assertEqual(self.w.tabs.count(),5);self.assertEqual(self.w.tabs.currentIndex(),0)
         for language,expected in (('en','OPTIONS'),('zh','选项')):
             self.w.lang_pills.set_key(language,animate=False);self.w.tabs.setCurrentIndex(self.w.advanced_tab_index);QTest.qWait(80)
             self.assertEqual(self.w.advanced.itemText(0),expected)
@@ -92,7 +92,7 @@ class MainMotionIntegrationTests(unittest.TestCase):
         QTest.qWait(T.MOTION_REVEAL_MS+80)
         self.assertIsNone(self.w.navigation_motion.overlay)
         self.assertFalse(self.w.navigation_motion._pending.isActive())
-        dialog=main.TextDialog('About','ALPHA 1.0 / private0516 / GPT-6 Astra',self.w)
+        dialog=main.TextDialog('About',f'{main.APP_VERSION} / {main.APP_AUTHOR} / GPT-6 Astra',self.w)
         dialog.show();QTest.qWait(30);self.assertIsNotNone(dialog.reveal.overlay)
         finished=[];dialog.finished.connect(finished.append)
         dialog.close();dialog.close()

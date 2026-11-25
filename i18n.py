@@ -27,12 +27,12 @@ S = {
 
         # 目录
         "lbl_in": "FO76 输入",
-        "lbl_out": "FO4 输出",
+        "lbl_out": "导出根目录",
         "ph_in": "拖入 Fallout 76 资源文件夹，或点击选择",
-        "ph_out": "选择 Fallout 4 输出目录（不能与输入相同）",
+        "ph_out": "选择与 Mesh Converter 共用的导出根目录",
         "btn_browse": "选择…",
         "pick_in": "选择 Fallout 76 输入目录",
-        "pick_out": "选择 Fallout 4 输出目录",
+        "pick_out": "选择导出根目录",
 
         # 转换模式
         "mode_high": "高质量",
@@ -64,7 +64,7 @@ S = {
         # 输出页
         "cb_overwrite": "覆盖已存在的输出文件",
         "cb_log": "生成日志 conversion_log.txt",
-        "cb_report": "生成报告 conversion_report.txt",
+        "cb_report": "保存转换报告",
         "cb_bgsm": "转换 BGSM / BGEM（实验性）",
 
         # 操作按钮
@@ -149,9 +149,7 @@ S = {
         "tip_in": "Fallout 76 的贴图资源目录。\n"
                   "程序会递归扫描其中的 .dds / .bgsm / .bgem 文件。\n"
                   "也可以直接把文件夹拖进窗口。",
-        "tip_out": "转换结果的输出目录。\n"
-                   "保留目录结构时会在其下复刻输入目录的层级。\n"
-                   "注意：不能与输入目录相同。",
+        "tip_out": "选择模组的根目录。材质写入 materials，贴图写入 textures。Mesh Converter 可将模型导出到同级的 meshes。",
         "tip_browse": "打开系统文件夹选择对话框",
         "tip_mode_high": "高质量：BC7 / BC5 · 完整 Mipmap。\n"
                          "适合机场、建筑、车辆等高精度近距离资产。",
@@ -164,12 +162,9 @@ S = {
         "tip_mip": "为贴图生成完整 Mipmap 链。\n"
                    "FO4 引擎需要 Mipmap 才能正确进行远距离贴图过滤，\n"
                    "建议保持开启。",
-        "tip_gens": "FO76 的金属度（_l）+ 粗糙度（_r）通道 "
-                    "合并生成 FO4 的 Specular（_s）贴图。\n"
-                    "缺少任一通道时会按警告跳过。",
-        "tip_metal": "FO76 的金属工作流与 FO4 高光工作流不同，\n"
-                     "开启后按金属度贴图对 Specular 做补偿提亮。\n"
-                     "默认关闭：过度补偿会导致材质发白。",
+        "tip_gens": "生成 FO4 的 _s 贴图。R 通道保存由 FO76 的 _r 推算的反射强度，"
+                    "G 通道保存来自 _l 红通道的光滑度。",
+        "tip_metal": "使用 FO76 的反射贴图（_r）来补偿漫反射贴图（_d）中偏暗的金属区域。",
         "tip_glow_l": "把 _l 贴图的 Alpha 通道提取为 FO4 的 Glow（_g）发光贴图。\n"
                       "仅当资产确实带发光层时开启。",
         "tip_invert": "FO76 与 FO4 的法线贴图 Green（Y）通道方向相反。\n"
@@ -190,8 +185,7 @@ S = {
                          "关闭则跳过已存在的文件（日志记为 SKIPPED）。",
         "tip_log": "在输出目录生成 conversion_log.txt，\n"
                    "逐文件记录转换结果，便于排查问题。",
-        "tip_report": "在输出目录生成 conversion_report.txt，\n"
-                      "汇总数量、体积变化与警告统计。",
+        "tip_report": "为本次转换保存日志、逐文件结果和清单到根目录下的 reports 文件夹。关闭后仍可在窗口查看实时日志。",
         "tip_bgsm": "同时转换材质文件 .bgsm / .bgem（实验性）。\n"
                     "基于内置模板写入贴图路径，复杂材质请人工复核。",
         "tip_dry": "只扫描并分析输入目录，不写任何文件。\n"
@@ -216,12 +210,12 @@ S = {
         "gb_opts": "QUICK OPTIONS",
 
         "lbl_in": "FO76 INPUT",
-        "lbl_out": "FO4 OUTPUT",
+        "lbl_out": "EXPORT ROOT",
         "ph_in": "Drop a Fallout 76 asset folder here, or click Browse",
-        "ph_out": "Choose the Fallout 4 output folder (must differ from input)",
+        "ph_out": "Choose the export root shared with Mesh Converter",
         "btn_browse": "BROWSE",
         "pick_in": "Choose the Fallout 76 input folder",
-        "pick_out": "Choose the Fallout 4 output folder",
+        "pick_out": "Choose the export root",
 
         "mode_high": "HIGH",
         "mode_balanced": "BALANCED",
@@ -250,7 +244,7 @@ S = {
 
         "cb_overwrite": "Overwrite existing output files",
         "cb_log": "Write conversion_log.txt",
-        "cb_report": "Write conversion_report.txt",
+        "cb_report": "Save reports",
         "cb_bgsm": "Convert BGSM / BGEM (experimental)",
 
         "btn_dry": "ANALYZE ONLY",
@@ -338,9 +332,7 @@ S = {
         "tip_in": "The Fallout 76 texture asset folder.\n"
                   "It is scanned recursively for .dds / .bgsm / .bgem files.\n"
                   "You can also drag a folder onto the window.",
-        "tip_out": "Destination folder for converted files.\n"
-                   "With structure kept, the input hierarchy is mirrored.\n"
-                   "Must not be the same as the input folder.",
+        "tip_out": "Choose your mod root. Materials go under materials and DDS files under textures. Mesh Converter can write meshes to the same root.",
         "tip_browse": "Open the system folder picker",
         "tip_mode_high": "HIGH: BC7 / BC5, full mipmaps.\n"
                          "Best for close-up hero assets like architecture "
@@ -355,12 +347,9 @@ S = {
         "tip_mip": "Generate full mipmap chains.\n"
                    "FO4 needs mipmaps for correct distance filtering.\n"
                    "Recommended to keep ON.",
-        "tip_gens": "Merge FO76 metalness (_l) + roughness (_r) channels\n"
-                    "into the FO4 Specular (_s) map.\n"
-                    "Missing channels are skipped with a warning.",
-        "tip_metal": "FO76 uses a metalness workflow while FO4 is specular.\n"
-                     "ON: brighten Specular based on the metalness map.\n"
-                     "Default OFF: over-compensation washes materials out.",
+        "tip_gens": "Build a FO4 _s map. Red stores reflectance intensity derived from FO76 _r. "
+                    "Green stores smoothness from the red channel of FO76 _l.",
+        "tip_metal": "Use FO76 reflectance (_r) to compensate for dark metal regions in the diffuse map (_d).",
         "tip_glow_l": "Extract the _l map's alpha channel as the FO4\n"
                       "Glow (_g) emissive map. Enable only when the asset\n"
                       "actually has an emissive layer.",
@@ -384,8 +373,7 @@ S = {
                          "OFF: skip them (logged as SKIPPED).",
         "tip_log": "Write conversion_log.txt into the output folder,\n"
                    "recording the per-file result for troubleshooting.",
-        "tip_report": "Write conversion_report.txt into the output folder,\n"
-                      "summarizing counts, size delta and warnings.",
+        "tip_report": "Save the log, per-file results and manifest under reports in the export root. The live log is available with either setting.",
         "tip_bgsm": "Also convert .bgsm / .bgem material files (experimental).\n"
                     "Texture paths are written from built-in templates;\n"
                     "double-check complex materials by hand.",

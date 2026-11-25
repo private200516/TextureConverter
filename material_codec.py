@@ -2,10 +2,10 @@
 No image interpretation is done here. Floating point colors stay float32, not RGB8.
 """
 from __future__ import annotations
-import json, math, struct
+import math, struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from security_io import pinned_path
+from security_io import json_bounded, pinned_path
 
 class MaterialError(ValueError): pass
 
@@ -14,7 +14,7 @@ MAX_MATERIAL_BYTES = 1024 * 1024
 
 def read_material_bytes(path):
     """Bound the allocation even if a file grows between stat and read."""
-    with pinned_path(path), Path(path).open('rb') as stream:
+    with pinned_path(path, must_exist=True) as held, held.open('rb') as stream:
         data = stream.read(MAX_MATERIAL_BYTES + 1)
     if not 8 <= len(data) <= MAX_MATERIAL_BYTES:
         raise MaterialError('Material size outside 8 B - 1 MiB')
@@ -131,21 +131,9 @@ _JSON_WRITE_MASKS = ('bWriteMaskAlbedo', 'bWriteMaskNormal', 'bWriteMaskSpecular
                      'bWriteMaskGloss', 'bWriteMaskEmissive', 'bWriteMaskAmbientOcclusion')
 
 
-def _json_pairs(pairs):
-    result={}
-    for key,value in pairs:
-        if key in result:raise MaterialError('Duplicate JSON material property: '+key)
-        result[key]=value
-    return result
-
-
 def _json_bool(value,key):
     if type(value) is not bool:raise MaterialError('JSON boolean required: '+key)
     return value
-
-
-def _json_nonfinite(value):
-    raise MaterialError('Non-finite JSON value: '+value)
 
 
 def _parse_json_material(data,kind,version):
@@ -154,10 +142,11 @@ def _parse_json_material(data,kind,version):
     if kind not in ('BGSM','BGEM') or type(version) is not int or version not in (2,22):
         raise MaterialError('JSON_SOURCE_VERSION_REQUIRED: provide BGSM/BGEM kind and source version 2 or 22 explicitly')
     try:
-        values=json.loads(data.decode('utf-8-sig'),object_pairs_hook=_json_pairs,
-                          parse_constant=_json_nonfinite)
+        # The Material Editor schema is a single object of scalar properties.
+        values=json_bounded(bytes(data), MAX_MATERIAL_BYTES, max_depth=1)
     except (UnicodeError,ValueError,RecursionError) as exc:
-        raise MaterialError('Invalid JSON material: '+str(exc)) from exc
+        message = str(exc).replace('Duplicate JSON property:', 'Duplicate JSON material property:', 1)
+        raise MaterialError('Invalid JSON material: '+message) from exc
     if not isinstance(values,dict) or not 1<=len(values)<=256:
         raise MaterialError('JSON material must be an object with 1 - 256 properties')
     formats=dict(layout(kind,version,{'EmitEnabled':True,'Terrain':True,'GlassEnabled':True}))
@@ -186,7 +175,7 @@ def _parse_json_material(data,kind,version):
         if fmt is None:raise MaterialError('Unknown JSON material property for '+kind+' v'+str(version)+': '+key)
         if key[0]=='b' and fmt=='?':fields[name]=_json_bool(value,key)
         elif (key[0]=='f' and fmt=='f') or (fmt in ('B','I') and (key[0]=='i' or key=='fAlphaTestRef')):
-            if type(value) not in (int,float) or not math.isfinite(value):raise MaterialError('Finite JSON number required: '+key)
+            if type(value) not in (int,float):raise MaterialError('Finite JSON number required: '+key)
             if fmt=='f':
                 if abs(value)>3.4028234663852886e38:raise MaterialError('JSON float32 outside range: '+key)
                 fields[name]=float(value)

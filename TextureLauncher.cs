@@ -10,22 +10,28 @@ using System.Threading;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Texture Converter")]
-[assembly: AssemblyProduct("Texture Converter ALPHA 1.0")]
-[assembly: AssemblyCompany("private0516")]
+[assembly: AssemblyProduct("Texture Converter 1.0")]
+[assembly: AssemblyCompany("Private0516")]
 [assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("ALPHA 1.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyInformationalVersion("1.0")]
 
 internal static class TextureLauncher
 {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
     [STAThread]
     private static int Main(string[] args)
     {
+        bool cli = args.Length > 0;
+        if (cli) AttachConsole(0xffffffff);
         LauncherLog log = null;
         try
         {
             string root = AppDomain.CurrentDomain.BaseDirectory;
             string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "private0516", "TextureConverter");
-            log = new LauncherLog(local, false);
+            log = new LauncherLog(local, cli, !(cli && LauncherLog.ReportDisabled(args)));
             string script = Path.Combine(root, "app", args.Length == 0 ? "main.py" : "texture_cli.py");
             string python = Path.Combine(root, "runtime", "python.exe");
             if (!File.Exists(script) || !File.Exists(python))
@@ -61,38 +67,48 @@ internal sealed class LauncherLog : IDisposable
     private bool capped;
     internal readonly string PathName;
 
-    internal LauncherLog(string directory, bool consoleOutput)
+    internal static bool ReportDisabled(string[] arguments)
     {
+        foreach (string argument in arguments)
+        {
+            if (argument == "--") break;
+            if (argument == "--no-report") return true;
+        }
+        return false;
+    }
+
+    internal LauncherLog(string directory, bool consoleOutput, bool retain = true)
+    {
+        console = consoleOutput;
+        if (!retain) return;
         Directory.CreateDirectory(directory);
         PathName = Path.Combine(directory, "launcher-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Process.GetCurrentProcess().Id + "-" + Guid.NewGuid().ToString("N") + ".log");
         stream = new FileStream(PathName, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-        console = consoleOutput;
     }
 
     internal void Write(string value, bool error)
     {
         if (value == null) return;
         if (value.Length > MaxRecordChars) value = value.Substring(0, MaxRecordChars) + " [record truncated]";
-        byte[] bytes = Encoding.UTF8.GetBytes(value + Environment.NewLine);
         lock (sync)
         {
-            if (capped) return;
-            // Reserve space for one terminal marker, including its newline.
+            if (console)
+            {
+                try { if (error) Console.Error.WriteLine(value); else Console.Out.WriteLine(value); }
+                catch (IOException) { }
+            }
+            if (stream == null || capped) return;
+            byte[] bytes = Encoding.UTF8.GetBytes(value + Environment.NewLine);
+            // Reserve room to record why the file ends. CLI progress stays live.
             if (written + bytes.Length > MaxLogBytes - 128)
             {
-                value = "[launcher log limit reached; further output is drained without retention]";
-                bytes = Encoding.UTF8.GetBytes(value + Environment.NewLine);
+                bytes = Encoding.UTF8.GetBytes("[launcher log limit reached; further output is drained without retention]" + Environment.NewLine);
                 capped = true;
             }
             try { stream.Write(bytes, 0, bytes.Length); stream.Flush(); }
             catch (IOException) { capped = true; }
             catch (UnauthorizedAccessException) { capped = true; }
             written += bytes.Length;
-            if (console)
-            {
-                try { if (error) Console.Error.WriteLine(value); else Console.Out.WriteLine(value); }
-                catch (IOException) { }
-            }
         }
     }
 
@@ -126,7 +142,7 @@ internal sealed class LauncherLog : IDisposable
         catch (ObjectDisposedException) { }
     }
 
-    public void Dispose() { lock (sync) { capped = true; stream.Dispose(); } }
+    public void Dispose() { lock (sync) { capped = true; if (stream != null) stream.Dispose(); } }
 }
 
 internal sealed class LauncherJob : IDisposable

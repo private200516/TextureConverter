@@ -1,4 +1,4 @@
-Texture Converter ALPHA 1.0 / private0516
+Texture Converter 1.0 / Private0516
 Incremental metal reconstruction build, 2026-10-06 workflow
 
 Project code: GPL-3.0. See LICENSE. Source is included as readable Python/C#.

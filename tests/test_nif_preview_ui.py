@@ -3,6 +3,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from pathlib import Path
 import tempfile,time,unittest
+from unittest.mock import patch
 try:
     from PySide6.QtWidgets import QApplication
     from nif_preview import NifPreviewPanel
@@ -72,6 +73,17 @@ class PreviewUiTests(unittest.TestCase):
         self.panel.open_nif(str(self.nif));self.finish();scene=self.panel._scene
         self.panel.set_resource_roots(root+'/.','')
         self.assertIs(self.panel._scene,scene);self.assertFalse(self.panel._needs_reload)
+    def test_export_refresh_targets_the_current_tree_only(self):
+        root = self.nif.parent / "Data"
+        self.panel.set_resource_roots(str(root), '')
+        self.assertTrue(self.panel.open_nif(str(self.nif)))
+        self.finish()
+        with patch.object(self.panel, 'open_nif') as reload_model:
+            self.panel.reload_after_export(self.nif.parent / "Other")
+            reload_model.assert_not_called()
+            self.panel.reload_after_export(root)
+            reload_model.assert_called_once_with(str(self.nif))
+
     def test_manual_root_edit_invalidates_on_editing_finished(self):
         self.panel.open_nif(str(self.nif));self.finish()
         self.panel.source_edit.setText(str(self.nif.parent/'other-source'))
@@ -95,5 +107,19 @@ class PreviewUiTests(unittest.TestCase):
             i18n.LANG='en';self.panel.retranslate();self.assertEqual(self.panel.open_button.text(),'Open NIF')
             i18n.LANG='zh';self.panel.retranslate();self.assertEqual(self.panel.open_button.text(),'选择 NIF')
         finally:i18n.LANG=previous
+
+    def test_without_opengl_keeps_import_and_diagnostics_available(self):
+        with patch('nif_preview.QOpenGLContext') as probe:
+            probe.return_value.create.return_value = False
+            panel = NifPreviewPanel()
+        try:
+            self.assertIsNone(panel.viewport_container)
+            self.assertIn('OpenGL', panel.viewport_still.text())
+            self.assertTrue(panel.open_button.isEnabled())
+            self.assertFalse(panel.fit_button.isEnabled())
+            self.assertTrue(panel.details_button.isEnabled())
+        finally:
+            panel.shutdown()
+            panel.deleteLater()
 
 if __name__=='__main__':unittest.main()

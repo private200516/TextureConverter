@@ -11,7 +11,7 @@ import hashlib
 import json
 import numpy as np
 
-ALGORITHM_VERSION = 'metal-reconstruction-1.0-alpha'
+ALGORITHM_VERSION = 'metal-reconstruction-1.1-alpha'
 READY = 'READY_FOR_METAL_ANALYSIS'
 
 

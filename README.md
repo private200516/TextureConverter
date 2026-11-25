@@ -1,8 +1,10 @@
-# TextureConverter · ALPHA 1.0
+# TextureConverter · 1.0
 
 <p><img src="assets/toolkit-logo.png" width="96" alt="76 Converter Toolkit logo"></p>
 
-> **当前版本 / Current revision:** `logo-refinement-release-20261117` · ALPHA 1.0。新 Logo 与安全加固，399 项回归通过；见 [本轮更新](LOGO_REFINEMENT_20261117.md)、[安全边界](SECURITY.md) 和 [构建记录](BUILD_PROVENANCE.json)。
+> **正式版 1.0 / Release 1.0**　与 Mesh Converter 选择同一个 Mod 根目录，输出直接进入原有的 materials 和 textures 层级。设置可关闭磁盘报告。
+>
+> Use the same mod root in both tools. Materials and textures go directly into their game paths. File reports are optional and live progress stays available. [测试记录 / Validation](SECURITY_VALIDATION.json)
 
 
 
@@ -12,13 +14,13 @@
 
 > 历史记录：较早的 runtime-motion 更新共通过 315 项测试，保留在 [VALIDATION_20261117.md](VALIDATION_20261117.md) 供追溯；该动效阶段采用上方的 323 项验证；当前安全修订结果以上方链接为准。下文“本次整理／未运行”等陈述属于 10 月源码发布阶段的历史说明。
 
-本地 BGSM/BGEM 材质转换与受支持的 DDS 适配工具。项目代码采用 GPL-3.0；作者为 private0516。原项目使用 GPT-6 Astra 辅助开发，代码与界面包含 AI 生成内容。本项目不代表 Bethesda、OpenAI 或依赖项目背书。
+本地 BGSM/BGEM 材质转换与受支持的 DDS 适配工具。项目代码采用 GPL-3.0；作者为 Private0516。原项目使用 GPT-6 Astra 辅助开发，代码与界面包含 AI 生成内容。本项目不代表 Bethesda、OpenAI 或依赖项目背书。
 
 这是完整的源代码开发包，包含原包字体、图标、经核对的 `tools/texconv.exe` 及其 MIT 通知；字体的公开发布已获用户明确授权且保留原始字节；图标更新为作者本轮提供的 Toolkit Logo。不含预编译产品 EXE、Python runtime、安装后的 vendor 依赖或用户游戏样本。随包编码器的身份不等于本次重新运行或验证了原生 DDS 编码。
 
 ## Windows 下载
 
-[TextureConverter.zip](https://github.com/private200516/TextureConverter/raw/refs/heads/main/downloads/TextureConverter.zip) · [SHA256 校验文件](downloads/TextureConverter.zip.sha256)
+[TextureConverter.zip](https://github.com/private200516/TextureConverter/releases/download/v1.0/TextureConverter.zip) · [SHA256 校验文件](https://github.com/private200516/TextureConverter/releases/download/v1.0/SHA256SUMS.txt)
 
 下载后先核对 ZIP 的 SHA256，再完整解压，并保留包内配套目录。Windows 分发包与源码开发包分别审核，文件布局以下载包内说明为准；下文的源码环境说明不描述 ZIP 内的组件。
 
@@ -46,7 +48,7 @@ $env:TEXTURE_CONVERTER_CONFIG = Join-Path $sourceConfigDirectory 'source-config.
 .\.venv\Scripts\python.exe -B -X utf8 .\main.py
 ```
 
-选择自己的输入目录和独立输出目录，检查 BGSM/BGEM 开关与 Metal 模式。普通转换可使用 Metal OFF。预检可先检查任务；保存完整日志和逐任务报告。本次没有重新启动或验收此源码 GUI。
+贴图与材质页、独立材质页共用一个导出根目录和报告设置。可在转换前选择是否保存报告。关闭后仍可查看本次实时日志。
 
 ## CLI
 
@@ -58,13 +60,12 @@ $env:TEXTURE_CONVERTER_CONFIG = Join-Path $sourceConfigDirectory 'source-config.
 .\.venv\Scripts\python.exe -B -X utf8 .\texture_cli.py '..\assets-owned\materials4' '..\results\materials-4-to-76' --direction 4-to-76 --materials-only --metal-mode off
 ```
 
-`--materials-only` 仅转换材质，不打包或验证其纹理依赖。`--dry-run` 仍会创建运行目录和报告，不生成可部署的材质/DDS 输出。正向材质目标为 v2，反向材质目标为 v22；反向 DDS/PBR 重建未实现，不能把材质双向转换理解为贴图算法可逆。
+与 Mesh Converter 选择同一个 Mod 根目录。例如将铁锹的材质和模型都导出到 `MyMod` 后，可直接打开 `MyMod/meshes/setdressing/shovel01.nif`，在模型预览中选择 `MyMod` 即可读取同目录的材质和贴图。
 
-每次运行会生成新的 `run_<time>_<id>/`：
-
-- `converted/materials/`、`converted/textures/`：已提交输出。
-- `reports/`：逐任务状态、警告、错误、验证、源哈希和日志。
-- `COMPLETE` / `PARTIAL`：文件处理状态，不是游戏外观验收；也应检查任务数，空任务不证明发生过转换。
+- `materials/` 和 `textures/` 下自动创建原资源的相对目录。`--materials-only` 仅生成材质。FO76 材质正向输出 v2，反向输出 v22。
+- 报告默认保存在 `reports/texture_<批次>/`。可在界面关闭报告，或传入 `--no-report`。配合 `--dry-run` 使用时，检查结果显示在终端。
+- 单独需要旧运行目录结构的命令行任务可加 `--output-layout isolated`，程序会生成 `run_<time>_<id>/converted/`。
+- 目标路径上已有内容不同的文件会提示冲突。如需比较采用不同参数的转换结果，可分别选择两个 Mod 根目录。
 
 完整保留警告，检查实际输出格式与引用关系。后备 DDS 编码路径只覆盖部分格式；例如 BC7 请求可能降级并告警。不要把后备结果、原生编码器结果或不同质量设置视为等价。
 

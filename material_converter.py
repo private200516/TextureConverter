@@ -1,11 +1,29 @@
 """Field-level conversion. Texture synthesis is supplied by MaterialJob, never guessed here."""
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import os, uuid
 from material_codec import Material, MaterialError, parse, serialize, layout, DEFAULTS
-from security_io import assert_no_reparse,pinned_path,publish_new
-BUILD='ALPHA 1.0 compatibility 2026-10-14'
+from security_io import assert_no_reparse,pinned_path,publish_new,safe_relative
+from config import APP_VERSION
 
-def convert_material(source,direction='76-to-4',texture_replacements=None,*,json_kind=None):
+BUILD = APP_VERSION
+
+def standalone_packed_reference(fields):
+    """Name the ordinary separately exported _s only for an explicit matching _r/_l pair."""
+    if fields.get('SmoothSpecTexture'):
+        return ''
+    reflection = fields.get('SpecularTexture')
+    lighting = fields.get('LightingTexture')
+    if not reflection or not lighting:
+        return ''
+    r = PurePosixPath(safe_relative(reflection))
+    l = PurePosixPath(safe_relative(lighting))
+    if (not r.name.lower().endswith('_r.dds') or not l.name.lower().endswith('_l.dds')
+            or str(r)[:-6].casefold() != str(l)[:-6].casefold()):
+        return ''
+    return l.with_name(l.name[:-6] + '_s.dds').as_posix()
+
+
+def convert_material(source,direction='76-to-4',texture_replacements=None,*,json_kind=None,standalone=False):
     if direction not in ('76-to-4','4-to-76'): raise MaterialError('Invalid direction')
     src=parse(source,json_kind=json_kind,json_version=22 if direction=='76-to-4' else 2) if not isinstance(source,Material) else source
     if direction=='76-to-4' and src.version<=2: raise MaterialError('Source is already FO4 material v1/v2')
@@ -21,13 +39,17 @@ def convert_material(source,direction='76-to-4',texture_replacements=None,*,json
             # Modern Specular is RGB reflectance, not FO4's packed R/G smooth-specular.
             if src.fields.get('SpecularTexture') or src.fields.get('LightingTexture'):
                 m.fields['SmoothSpecTexture']=(texture_replacements or {}).get('SmoothSpecTexture','')
+                if standalone and not m.fields['SmoothSpecTexture']:
+                    packed = standalone_packed_reference(src.fields)
+                    if packed:
+                        m.fields['SmoothSpecTexture'] = packed
+                        warnings.append('EXTERNAL_PACKED_SPECULAR: provide the separately converted '+packed+'; use combined export for per-material texture variants')
                 if not m.fields['SmoothSpecTexture']:
                     warnings.append('PACKED_SPECULAR_REQUIRED: FO76 reflectance/lighting require generated FO4 _s; slot left empty')
         elif src.fields.get('SmoothSpecTexture'):
             warnings.append('REVERSE_TEXTURE_ADAPTATION_REQUIRED: FO4 packed _s is not FO76 RGB reflectance/lighting')
             m.fields['SmoothSpecTexture']=''
     if texture_replacements: m.fields.update(texture_replacements)
-    from material_jobs import safe_relative
     for key,value in list(m.fields.items()):
         if value and isinstance(value,str):
             normalized=safe_relative(value)
@@ -48,18 +70,24 @@ def convert_material(source,direction='76-to-4',texture_replacements=None,*,json
 def convert_file(src,dest,direction='76-to-4',dry_run=False,_staged=False,texture_replacements=None,json_kind=None,**unused):
     src=assert_no_reparse(src); dest=assert_no_reparse(dest)
     if src==dest: raise MaterialError('Input is read-only; choose another destination')
-    m,info=convert_material(src,direction,texture_replacements,json_kind=json_kind)
+    m,info=convert_material(src,direction,texture_replacements,json_kind=json_kind,standalone=not _staged)
     info.update(source=str(src),output=str(dest),dry_run=dry_run,direction=direction)
     if dry_run:return info
     if dest.exists():raise FileExistsError(dest)
     with pinned_path(dest.parent):dest.parent.mkdir(parents=True,exist_ok=True)
     tmp=dest if _staged else dest.with_name('.material-'+uuid.uuid4().hex+'.tmp')
-    try:
-        with pinned_path(tmp),tmp.open('xb') as f:f.write(serialize(m))
-        check=parse(tmp)
-        if check.fields!=m.fields:raise MaterialError('Written material differs from serialized fields')
-        if not _staged:
-            publish_new(tmp,dest)
-    finally:
-        if not _staged and tmp.exists():tmp.unlink()
+    with pinned_path(dest.parent):
+        created = False
+        try:
+            with pinned_path(tmp), tmp.open('xb') as stream:
+                created = True
+                stream.write(serialize(m))
+            check=parse(tmp)
+            if check.fields!=m.fields:raise MaterialError('Written material differs from serialized fields')
+            if not _staged:
+                publish_new(tmp,dest)
+                created = False
+        finally:
+            if created and not _staged:
+                tmp.unlink(missing_ok=True)
     return info

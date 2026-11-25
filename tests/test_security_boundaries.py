@@ -70,9 +70,12 @@ class MaterialReadBoundaryTests(unittest.TestCase):
                     raise AssertionError('material read escaped its allocation cap')
                 return super().read(size)
         stream=LargeFile(b'x'*(MAX_MATERIAL_BYTES+2))
-        with patch('material_codec.Path.open',return_value=stream):
-            with self.assertRaisesRegex(MaterialError,'Material size'):
-                parse(Path('oversized.bgsm'))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'oversized.bgsm'
+            path.touch()
+            with patch('material_codec.Path.open',return_value=stream):
+                with self.assertRaisesRegex(MaterialError,'Material size'):
+                    parse(path)
 
     def test_scanner_reports_oversized_material_as_failed_input(self):
         with tempfile.TemporaryDirectory() as directory:

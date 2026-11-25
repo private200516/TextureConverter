@@ -54,7 +54,7 @@ class WorkflowReviewTests(unittest.TestCase):
                    diffuse_fmt='BC3_UNORM',metal_options={'texconv_path':False})
         cfg.job_overrides={self.job['id']:dict(self.opts)}
         log=run_jobs([self.job],cfg)
-        report=json.loads((Path(log.output_dir)/'reports/report.json').read_text())
+        report=json.loads((Path(log.report_dir)/'report.json').read_text())
         result=report['results'][0]
         self.assertEqual(result['metal']['mode'],'off')
         self.assertFalse(result['metal']['applied'])

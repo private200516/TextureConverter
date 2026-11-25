@@ -1,5 +1,6 @@
 """One local pipeline shared by Qt preview, grouped export and CLI."""
 from __future__ import annotations
+from contextlib import ExitStack
 import csv, dataclasses, hashlib, json, os, shutil, tempfile, time, uuid
 from pathlib import Path
 import numpy as np
@@ -7,11 +8,11 @@ from PIL import Image
 import dds, material
 from material_codec import Material, parse, serialize, read_material_bytes
 from options_policy import processing_options, job_options
-from material_converter import convert_material, BUILD
-from material_jobs import scan_jobs, sha256, safe_relative, asset_relative
+from material_converter import convert_material, standalone_packed_reference, BUILD
+from material_jobs import scan_jobs, sha256, safe_relative, asset_relative, asset_root, game_output_root, reference_relative
 from metal_reconstruction import ColorContract, MetalOptions, TargetProfile, reconstruct, align_numeric, MetalResult, ALGORITHM_VERSION, _validate_config, _array
 from logger import ConversionLog
-from security_io import (assert_no_reparse, open_read, pinned_path, publish_new,
+from security_io import (assert_no_reparse, open_read, pinned_path, publish_new, publication_lock, export_directory,
                          MAX_ASSET_BYTES, png_header)
 
 Cancelled=dds.CancellationRequested
@@ -36,6 +37,7 @@ def _source_hash(path,cancel=None):
 
 
 def _copy_file(source,target,cancel=None):
+    digest = hashlib.sha256()
     with open_read(source) as src,pinned_path(target),open(target,'xb') as dst:
         if os.fstat(src.fileno()).st_size>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset exceeds 512 MiB')
         total=0
@@ -45,7 +47,9 @@ def _copy_file(source,target,cancel=None):
             total+=len(block)
             if total>MAX_ASSET_BYTES:raise ValueError('SOURCE_SIZE_LIMIT: asset grew beyond 512 MiB')
             dds._write_bytes(dst,block,cancel)
+            digest.update(block)
     _check(cancel)
+    return digest.hexdigest()
 
 
 def _validate_job_sources(job):
@@ -57,6 +61,10 @@ def _validate_job_sources(job):
     for value in [job.get('material_path'),*job.get('texture_paths',{}).values()]:
         if value and not assert_no_reparse(value).is_relative_to(root):
             raise ValueError('Source escapes selected resource root')
+    if job.get('material_path'):
+        expected = asset_relative(job['material_path'],root,'materials')
+        if Path(safe_relative(job['relative_path'])) != Path(expected):
+            raise ValueError('Material destination must match its source asset path')
     return root
 
 def _json(value):
@@ -77,6 +85,7 @@ def _options(cfg=None,extra=None):
     if extra is not None:
         values.update(extra if isinstance(extra,_RuntimeOptions) else processing_options(extra))
     values.pop('job_overrides',None);values.pop('metal_options',None)
+    values.pop('materials_input',None)
     return _RuntimeOptions(values)
 
 
@@ -92,7 +101,7 @@ def _codec_context(external=True):
     identity=_codec_identity(external)
     code_paths=[Path(__file__),Path(__file__).parent/'dds.py',
                 Path(__file__).parent/'semantic_dds.py',
-                Path(__file__).parent/'metal_reconstruction.py',
+                Path(__file__).parent/'metal_reconstruction.py',Path(__file__).parent/'material.py',
                 Path(__file__).parent/'options_policy.py']
     data={'code':{x.name:sha256(x) for x in code_paths},'codec':identity}
     return {'_codec_identity':identity,
@@ -197,16 +206,22 @@ def _mask(opts,key,pathkey,shape):
     if a.shape!=shape:raise ValueError('MASK_SIZE_MISMATCH: masks must match source diffuse dimensions; no silent resize')
     return a
 
-def _baseline(arrays,opts,cancel=None):
+def _baseline(arrays,opts,cancel=None,*,headers,diagnostics):
     _check(cancel)
     a={k:v.copy() for k,v in arrays.items()}
     if 'd' in a:
-        if opts.get('ao_mode') and 'l' in a:a['d']=material.apply_ao_to_diffuse(a['d'],a['l'],opts.get('ao_strength',.3))
-        _check(cancel)
-        if opts.get('metal_compensation') and 'r' in a:a['d']=material.apply_metal_compensation(a['d'],a['r'],opts.get('metal_strength',.5))
+        original = None
+        if opts.get('ao_mode') and 'l' in a:
+            original = a['d']
+            a['d']=material.apply_ao_to_diffuse(original,a['l'],opts.get('ao_strength',.3),cancel_event=cancel)
+        if opts.get('metal_compensation') and 'r' in a and 'UNSUPPORTED_SHADER' not in diagnostics:
+            a['d']=material.apply_metal_compensation(
+                a['d'],a['r'],opts.get('metal_strength',.5),
+                reflectance_format=headers['r']['fmt'],diffuse_format=headers['d']['fmt'],
+                source_diffuse=original,cancel_event=cancel)
         _check(cancel)
     if 'n' in a and opts.get('invert_green'):a['n']=material.invert_green_channel(a['n'])
-    if 's' not in a and 'r' in a and 'l' in a and opts.get('generate_s',True):a['s']=material.build_specular(a['l'],a['r'])
+    if 's' not in a and 'r' in a and 'l' in a and opts.get('generate_s',True):a['s']=material.build_specular(a['l'],a['r'],cancel_event=cancel)
     _check(cancel)
     if 'g' not in a and 'l' in a and opts.get('glow_from_l_alpha'):a['g']=material.build_glow_from_l_alpha(a['l'])
     _check(cancel)
@@ -215,10 +230,9 @@ def _baseline(arrays,opts,cancel=None):
 def _prepare(job,opts,intent='export',cancel=None,dependency_hashes=None):
     arrays,headers,hashes=_load(job,cancel,opts.get('mode','off')!='off',intent=='preview',dependency_hashes,opts.get('_stage_cb'))
     if opts.get('_stage_cb'):opts['_stage_cb']('Channels / 通道处理')
-    base=_baseline(arrays,opts,cancel)
     diagnostics=[x.split(':',1)[0] for x in job.get('diagnostics',[])]
+    base=_baseline(arrays,opts,cancel,headers=headers,diagnostics=diagnostics)
     if 'd' not in base:return arrays,base,None,headers,hashes,diagnostics
-    if base['d'].shape!=arrays['d'].shape:raise ValueError('LEGACY_RESIZE_CONFLICT: AO/metal compensation would resize diffuse; use matching grids or disable it')
     shape=base['d'].shape[:2];s=base.get('s')
     addressing='wrap' if job.get('material_fields',{}).get('TileFlags')==3 else 'clamp' if job.get('material_fields',{}).get('TileFlags')==0 else 'unknown'
     addressing=opts.get('addressing',addressing)
@@ -238,6 +252,8 @@ def _prepare(job,opts,intent='export',cancel=None,dependency_hashes=None):
         if reviewed!=hashes:
             confirmed=False;diagnostics.append('REVIEWED_SOURCE_CHANGED' if reviewed else 'SOURCE_REVIEW_REQUIRED')
     mo=MetalOptions(mode=mode,color_strength=float(opts.get('reconstruction_strength',.65)),specular_strength=float(opts.get('specular_strength',.35)),smoothness_strength=float(opts.get('smoothness_strength',.25)),user_confirmed_task=confirmed,erode_px=int(opts.get('erode_px',1 if opts.get('boundary')=='erode' else 0)),feather_px=int(opts.get('feather_px',1 if opts.get('boundary')=='feather' else 0)),addressing=addressing)
+    if rf in ('BC4_UNORM','R8_UNORM') and (dc.explicit_override or dc.transfer_function)=='srgb':
+        mo=dataclasses.replace(mo,r_low=32/255,r_high=63/255)
     profile=TargetProfile(tint_retention=float(opts.get('tint_retention',.25)))
     if mode=='off' and intent=='export':
         _validate_config(profile,mo)
@@ -321,12 +337,41 @@ def _safe_output(root,relative):
     if not p.is_relative_to(root):raise ValueError('Output escapes run root')
     return p
 
-def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cancel_event=None,log=None):
+def _material_references(material_source, replacements):
+    # Game files commonly omit the textures/ prefix. Keep the original spelling
+    # when it identifies our output (including the separately converted _s).
+    result = {}
+    for slot, destination in replacements.items():
+        authored = material_source.fields.get(slot)
+        if slot=='SmoothSpecTexture' and not authored:
+            authored = standalone_packed_reference(material_source.fields)
+        if authored and reference_relative(authored,'textures').casefold()==destination.casefold():
+            result[slot] = authored
+        elif authored and not safe_relative(authored).lower().startswith(('textures/','data/textures/')):
+            result[slot] = destination.split('/',1)[1]
+        else:
+            result[slot] = destination
+    return result
+
+
+def _export_maps(job, direction, kind):
+    maps = job['texture_paths']
+    if job.get('material_path') and kind == 'BGEM' and direction == '76-to-4':
+        # FO4 effects have base and normal maps plus separately copied effect
+        # dependencies. PBR lighting and reflectance cannot supply an environment mask.
+        return {role:path for role,path in maps.items() if role in ('d','n')}
+    return maps
+
+
+def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cancel_event=None,log=None,*,generate_report=True):
+    if not output_root or not str(output_root).strip():raise ValueError('Select an output directory')
+    if not isinstance(generate_report, bool):raise ValueError('Report preference must be true or false')
     opts=_options(extra=options)
-    if '_codec_identity' not in opts:
+    if job.get('include_textures',True) and '_codec_identity' not in opts:
         opts.update(_codec_context(opts.get('texconv_path') is not False))
     out=assert_no_reparse(output_root);source_root=_validate_job_sources(job)
     if source_root.is_file():source_root=source_root.parent
+    if game_output_root(out)!=out:raise ValueError('Select the parent of meshes, materials or textures as the shared output root')
     if out==source_root or out.is_relative_to(source_root) or source_root.is_relative_to(out):raise ValueError('Input and output may not overlap')
     _check(cancel_event)
     fingerprint=_variant_fingerprint(job,opts)
@@ -337,42 +382,46 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
         if job.get('material_sha256') and material_hash!=job['material_sha256']:raise ValueError('MATERIAL_CHANGED_SINCE_SCAN: rescan before conversion')
         material_source=Material(job['material_kind'],job['material_version'],dict(job['material_fields']),dict(job.get('material_source_info',{}))) if job.get('material_sha256') and 'material_fields' in job else parse(payload,json_kind=job.get('material_kind',Path(job['material_path']).suffix[1:].upper()),json_version=22 if direction=='76-to-4' else 2)
     info=dict(id=job['id'],name=job['name'],direction=direction,outputs=[],warnings=[],game_verified=False,dry_run=dry_run,build=BUILD)
+    maps = _export_maps(job, direction, material_source.kind if material_source else None)
+    texture_job = job if maps is job['texture_paths'] else dict(job,texture_paths=maps)
     if dry_run:
         if job['material_path']:
-            _,mi=convert_material(material_source,direction);info['material']=mi
-        info['plan']=dict(textures=job['texture_paths'],references=job['texture_references'],diagnostics=job['diagnostics'])
+            _,mi=convert_material(material_source,direction,standalone=not job.get('include_textures',True));info['material']=mi
+        info['plan']=dict(textures=texture_job['texture_paths'],references=job['texture_references'],diagnostics=job['diagnostics'])
         return info
     if direction!='76-to-4' and job['texture_paths'] and job.get('include_textures',True):raise ValueError('REVERSE_DDS_UNSUPPORTED: packed FO4 channels cannot reconstruct original FO76 reflectance and lighting')
-    from contextlib import ExitStack
     pins=ExitStack()
     try:
-        with pinned_path(out):out.mkdir(parents=True,exist_ok=True)
-        pins.enter_context(pinned_path(out))
+        pins.enter_context(export_directory(out))
         stage=Path(tempfile.mkdtemp(prefix='.staging-'+job['id']+'-',dir=out))
         pins.enter_context(pinned_path(stage))
     except Exception:
         pins.close();raise
     made=[];manifest_tmp=None;committed=False
+    publication=ExitStack()
     try:
         replacements={};records={};hashes={};meta=None;cache_key=None;texture_cache=opts.get('_texture_cache')
         if job.get('include_textures',True):
             dependency_hashes={}
-            for src in job['texture_paths'].values():
+            for src in texture_job['texture_paths'].values():
                 _check(cancel_event)
                 if src not in dependency_hashes:dependency_hashes[src]=_source_hash(src,cancel_event)
             if job.get('material_path'):dependency_hashes[job['material_path']]=material_hash
             review_valid=opts.get('reviewed_source_hashes')==dependency_hashes
             if job.get('material_path') and job.get('material_sha256') and dependency_hashes.get(job.get('material_path'))!=job['material_sha256']:raise ValueError('MATERIAL_CHANGED_SINCE_SCAN: rescan before conversion')
-            cache_key=hashlib.sha256((json.dumps({k:v for k,v in dependency_hashes.items() if k!=job.get('material_path')},sort_keys=True)+fingerprint+json.dumps(job.get('_variant_keys',{}),sort_keys=True)+str(review_valid)).encode()).hexdigest()
+            cache_key=hashlib.sha256(((material_source.kind if material_source else 'texture_group')+json.dumps({k:v for k,v in dependency_hashes.items() if k!=job.get('material_path')},sort_keys=True)+fingerprint+json.dumps(job.get('_variant_keys',{}),sort_keys=True)+str(review_valid)).encode()).hexdigest()
             cached=texture_cache.get(cache_key) if texture_cache is not None else None
             if cached and all(Path(file).is_file() and _source_hash(file,cancel_event)==record['sha256'] for file,record in cached['files'].items()):
                 hashes.update(dependency_hashes);replacements.update(cached['replacements'])
                 for file,record in cached['files'].items():
-                    rel=record['relative'];dst=_safe_output(stage,rel);dst.parent.mkdir(parents=True,exist_ok=True);_copy_file(file,dst,cancel_event);records[rel]=dict(record['validation'])
+                    rel=record['relative'];dst=_safe_output(stage,rel);dst.parent.mkdir(parents=True,exist_ok=True)
+                    if _copy_file(file,dst,cancel_event) != record['sha256']:
+                        raise ValueError('Cached texture changed during copy: '+rel)
+                    records[rel]=dict(record['validation'])
                 if cached.get('metal') is not None:info['metal']=cached['metal']
                 info['source_headers']=cached.get('source_headers',{});info['texture_cache_reused']=True
             else:
-                arrays,base,result,headers,hashes,diagnostics=_prepare(job,opts,'export',cancel_event,dependency_hashes)
+                arrays,base,result,headers,hashes,diagnostics=_prepare(texture_job,opts,'export',cancel_event,dependency_hashes)
                 info['source_headers']=headers;info['diagnostics']=diagnostics
                 if result is not None:
                     info['metal']=result.report
@@ -393,30 +442,51 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
                     records[rel]=_encode(base[role],role,path,encode_opts,cancel_event)
                     if result is not None and role in ('d','s') and result.report['applied']:
                         baseline_path=stage/('.baseline-'+role+'.dds')
-                        baseline_array=_baseline(arrays,opts,cancel_event)[role]
+                        baseline_array=_baseline(arrays,opts,cancel_event,headers=headers,diagnostics=diagnostics)[role]
                         _encode(baseline_array,role,baseline_path,encode_opts,cancel_event)
                         base_read=dds.decode_dds_pixels(str(baseline_path),cancel_event=cancel_event);new_read=dds.decode_dds_pixels(str(path),cancel_event=cancel_event)
                         protected=result.protect_mask>0
                         if protected.shape==new_read.shape[:2]:
                             delta=np.abs(new_read.astype(float)-base_read.astype(float));records[rel]['protected_postcompression_mae']=float(delta[protected].mean()) if protected.any() else 0.
                         baseline_path.unlink()
-                    slot={'d':'BaseTexture' if job.get('material_kind')=='BGEM' else 'DiffuseTexture','n':'NormalTexture','s':'EnvmapMaskTexture' if job.get('material_kind')=='BGEM' else 'SmoothSpecTexture','g':'GlowTexture'}[role]
+                    slot={'d':'BaseTexture' if material_source and material_source.kind=='BGEM' else 'DiffuseTexture','n':'NormalTexture','s':'SmoothSpecTexture','g':'GlowTexture'}[role]
                     replacements[slot]=rel
                 if 'unknown' in job['texture_paths']:
-                    src=Path(job['texture_paths']['unknown']);rel=asset_relative(src,Path(job['asset_root']),'textures');dst=_safe_output(stage,rel);dst.parent.mkdir(parents=True,exist_ok=True);_copy_file(src,dst,cancel_event);records[rel]={'copied_unclassified':True}
+                    src=Path(job['texture_paths']['unknown']);rel=asset_relative(src,Path(job['asset_root']),'textures')
+                    dst=_safe_output(stage,rel);dst.parent.mkdir(parents=True,exist_ok=True)
+                    if _copy_file(src,dst,cancel_event) != hashes[str(src)]:
+                        raise ValueError('Source changed during copy: '+str(src))
+                    records[rel]={'copied_unclassified':True}
         if job['material_path']:
-            hashes[job['material_path']]=material_hash;mat,mi=convert_material(material_source,direction,replacements);info['material']=mi;info['warnings']+=mi['warnings']
+            hashes[job['material_path']] = material_hash
+            mat,mi = convert_material(material_source,direction,_material_references(material_source,replacements),standalone=not job.get('include_textures',True))
+            info['material']=mi;info['warnings']+=mi['warnings']
             # Resolve all target references before material publication. Unchanged extra slots are copied as data.
             if job.get('include_textures',True):
                 base_root=Path(job['asset_root']).resolve()
                 from material_jobs import resolve_reference
+                slot_roles = {'BaseTexture':'d','DiffuseTexture':'d','NormalTexture':'n',
+                              'SmoothSpecTexture':'s','GlowTexture':'g'}
+                encoded_sources = {Path(relative): Path(texture_job['texture_paths'][slot_roles[slot]])
+                                   for slot,relative in replacements.items()
+                                   if slot_roles[slot] in texture_job['texture_paths']}
                 for slot,ref in mat.textures().items():
                     _check(cancel_event)
                     target=_safe_output(stage,ref if ref.lower().startswith('textures/') else 'textures/'+ref)
-                    if target.exists():continue
+                    if slot in replacements:continue
                     src,rel=resolve_reference(base_root,ref)
                     if not src.is_file():raise ValueError('MATERIAL_REFERENCE_ERROR: missing '+slot+' '+ref)
-                    if not target.exists():target.parent.mkdir(parents=True,exist_ok=True);_copy_file(src,target,cancel_event);records[rel]={'copied_dependency':True};hashes[str(src)]=_source_hash(src,cancel_event)
+                    if target.exists():
+                        # Two slots can deliberately reuse the same authored input.
+                        if encoded_sources.get(Path(rel)) != src:
+                            digest = _source_hash(src,cancel_event)
+                            if digest != _source_hash(target,cancel_event):
+                                raise ValueError('Conflicting generated texture and material dependency: '+rel)
+                            hashes[str(src)] = digest
+                        continue
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                    hashes[str(src)] = _copy_file(src,target,cancel_event)
+                    records[rel]={'copied_dependency':True}
                 if mat.fields.get('RootMaterialPath'):raise ValueError('ROOT_MATERIAL_DEPENDENCY: convert parent chain explicitly before grouped deployment')
             else:info['warnings'].append('MATERIAL_ONLY: texture dependencies were not packaged or verified')
             rel=job['relative_path'];target=_safe_output(stage,rel);target.parent.mkdir(parents=True,exist_ok=True)
@@ -427,6 +497,7 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
             _check(cancel_event)
             if _source_hash(src,cancel_event)!=h:raise ValueError('Source changed during conversion: '+src)
         if _variant_fingerprint(job,opts)!=fingerprint:raise ValueError('SETTINGS_CHANGED_DURING_BATCH: mask changed before commit')
+        publication.enter_context(publication_lock(out, lambda: _check(cancel_event)))
         pending=[]
         for rel,record in records.items():
             _check(cancel_event)
@@ -438,20 +509,22 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
         # Completion manifest is published last. Roll back only new files if any rename fails.
         for src,dst in pending:
             _check(cancel_event)
-            with pinned_path(dst.parent):dst.parent.mkdir(parents=True,exist_ok=True)
-            pins.enter_context(pinned_path(dst.parent))
+            pins.enter_context(export_directory(dst.parent))
             publish_new(src,dst);made.append(dst)
         info.update(validation=records,source_hashes=hashes,status='committed',processing_key=hashlib.sha256((json.dumps(hashes,sort_keys=True)+fingerprint).encode()).hexdigest(),variants=job.get('_variant_keys',{}))
-        manifests=_safe_output(out,'.manifests')
-        with pinned_path(manifests):manifests.mkdir(exist_ok=True)
-        pins.enter_context(pinned_path(manifests))
-        manifest=_safe_output(out,'.manifests/'+job['id']+'.json');tmp=_safe_output(out,'.manifests/'+job['id']+'.tmp')
-        _check(cancel_event)
-        with tmp.open('x',encoding='utf8') as stream:
-            manifest_tmp=tmp;stream.write(json.dumps(info,indent=2,default=_json))
-        _check(cancel_event);tmp.replace(manifest);manifest_tmp=None;committed=True
+        if generate_report:
+            manifests=_safe_output(out,'.manifests')
+            pins.enter_context(export_directory(manifests))
+            manifest=_safe_output(out,'.manifests/'+job['id']+'.json');tmp=_safe_output(out,'.manifests/'+job['id']+'.tmp')
+            _check(cancel_event)
+            with tmp.open('x',encoding='utf8') as stream:
+                manifest_tmp=tmp;stream.write(json.dumps(info,indent=2,default=_json))
+            _check(cancel_event);tmp.replace(manifest);manifest_tmp=None
+        else:
+            _check(cancel_event)
+        committed=True
         if texture_cache is not None and cache_key:
-            entry={'replacements':replacements,'metal':info.get('metal'),'source_headers':info.get('source_headers'), 'files':{str(_safe_output(out,rel)):{'relative':rel,'sha256':record['sha256'],'validation':record} for rel,record in records.items() if rel.lower().endswith('.dds')}}
+            entry={'replacements':replacements,'metal':info.get('metal'),'source_headers':info.get('source_headers'), 'files':{str(_safe_output(out,rel)):{'relative':rel,'sha256':record['sha256'],'validation':record} for rel,record in records.items() if rel.lower().endswith('.dds') and not record.get('copied_dependency')}}
             texture_cache[cache_key]=entry
             while len(texture_cache)>32:texture_cache.pop(next(iter(texture_cache)))
         return info
@@ -460,6 +533,7 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
             for path in reversed(made):path.unlink(missing_ok=True)
         raise
     finally:
+        publication.close()
         if manifest_tmp is not None:manifest_tmp.unlink(missing_ok=True)
         pins.close()
         shutil.rmtree(stage)
@@ -468,7 +542,10 @@ def run_job(job,output_root,direction='76-to-4',dry_run=False,options=None,cance
 def _variant_fingerprint(job, options):
     # Processing identity excludes destination paths/time/UI fields. Shared dependencies
     # and material settings can change output even when the diffuse file is identical.
-    ignored={'input_dir','output_dir','generate_log','generate_report','about_seen','lang','overwrite','keep_structure','job_overrides','metal_options','manual_mask','protect_mask','reviewed_source_hashes'}
+    if not job.get('include_textures',True):
+        # Material conversion depends on the wire fields and source bytes, never on DDS/mask settings.
+        return hashlib.sha256(('materials-only|' + BUILD + '|' + (job.get('material_sha256') or '')).encode()).hexdigest()[:12]
+    ignored={'input_dir','output_dir','output_layout','generate_log','generate_report','about_seen','lang','overwrite','keep_structure','job_overrides','metal_options','manual_mask','protect_mask','reviewed_source_hashes'}
     values={k:v for k,v in options.items() if k not in ignored and not k.startswith('_')}
     masks_enabled=options.get('mode','off')!='off'
     for key in ('edit_mask_path','protect_mask_path'):
@@ -492,10 +569,9 @@ def _variant_fingerprint(job, options):
 
 class _BatchReports:
     """Append complete reports once per job; never retain the full result tree in RAM."""
-    def __init__(self, directory):
-        from contextlib import ExitStack
-        self.stack=ExitStack();self.count=0;self.ordinary=0;self.metal=0;self.review=0
-        def open_report(name,**kw):return self.stack.enter_context((directory/name).open('w',buffering=1024*1024,**kw))
+    def __init__(self, directory, stack):
+        self.stack=stack;self.count=0;self.ordinary=0;self.metal=0;self.review=0
+        def open_report(name,**kw):return stack.enter_context((directory/name).open('x',buffering=1024*1024,**kw))
         self.report=open_report('report.json',encoding='utf8');self.report.write('{"results":[\n')
         self.validation=open_report('validation_results.json',encoding='utf8');self.validation.write('{\n')
         self.manifest=open_report('conversion_manifest.json',encoding='utf8');self.manifest.write('[\n')
@@ -524,9 +600,16 @@ class _BatchReports:
 
 
 def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_only=False,dry_run=False):
+    if analyze_only and dry_run:raise ValueError('Choose dry run or analyze only')
     opts=_options(cfg);overrides=job_options(getattr(cfg,'job_overrides',{}))
+    if not cfg.output_dir or not str(cfg.output_dir).strip() or not cfg.input_dir or not str(cfg.input_dir).strip():
+        raise ValueError('Select both an input and output directory')
     root=assert_no_reparse(cfg.output_dir);input_root=assert_no_reparse(cfg.input_dir)
+    if not (input_root.is_file() or input_root.is_dir()):raise FileNotFoundError(input_root)
+    if root.exists() and not root.is_dir():raise NotADirectoryError(root)
     if root==input_root or root.is_relative_to(input_root) or input_root.is_relative_to(root):raise ValueError('Input and output directories must not overlap')
+    selected_tree=asset_root(input_root)
+    if root==selected_tree or root.is_relative_to(selected_tree) or selected_tree.is_relative_to(root):raise ValueError('Output may not overlap the source resource root')
     checked_roots=set()
     for job in jobs:
         if cancel_event is not None and cancel_event.is_set():break
@@ -534,18 +617,62 @@ def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_onl
         if job['asset_root'] in checked_roots:continue
         asset=Path(job['asset_root']).resolve();checked_roots.add(job['asset_root'])
         if root==asset or root.is_relative_to(asset) or asset.is_relative_to(root):raise ValueError('Output may not overlap any source resource root')
-    root.mkdir(parents=True,exist_ok=True);run=root/('run_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]);run.mkdir()
-    reportdir=run/'reports';reportdir.mkdir();log=ConversionLog();log.on_entry=log_cb;log.output_dir=str(run)
-    log.start_stream(str(reportdir/'conversion_log.txt'));reports=_BatchReports(reportdir)
+    layout=getattr(cfg,'output_layout','game')
+    if layout not in ('game','isolated'):raise ValueError('Unknown output layout')
+    if layout=='game' and game_output_root(root)!=root:
+        raise ValueError('Select the parent of meshes, materials or textures as the shared output root')
+    save_reports=getattr(cfg,'generate_report',True)
+    if not isinstance(save_reports,bool):raise ValueError('Report preference must be true or false')
+    log = ConversionLog()
+    log.on_entry = log_cb
+    make_previews = analyze_only and any(job.get('include_textures',True) for job in jobs)
+    if not save_reports and (not jobs or dry_run or (analyze_only and not make_previews)):
+        log.output_dir = str(root)
+        return _execute_jobs(jobs,cfg,opts,overrides,root,None,None,None,log,
+                             progress_cb,cancel_event,analyze_only,dry_run,False)
+    with export_directory(root), ExitStack() as directories, ExitStack() as streams:
+        stamp=time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex
+        isolated = layout=='isolated'
+        def directory(path, *, fresh=False):
+            return directories.enter_context(export_directory(path,fresh=fresh))
+        run = directory(root/('run_'+stamp),fresh=True) if isolated else root
+        assets = run/'converted' if isolated else root
+        reportdir = None
+        metadata = None
+        reports = None
+        log.output_dir = str(run)
+        if save_reports:
+            reports_root = directory(run/'reports')
+            reportdir = reports_root if isolated else directory(reports_root/('texture_'+stamp),fresh=True)
+            metadata = run if isolated else reportdir
+            reports = _BatchReports(reportdir, streams)
+            log.report_dir = str(reportdir)
+            log_path = str(reportdir/'conversion_log.txt')
+            log.start_stream(log_path, exclusive=True)
+        previews = None
+        if make_previews:
+            previews_root = directory(run/'previews')
+            previews = previews_root if isolated else directory(previews_root/('texture_'+stamp),fresh=True)
+        try:
+            return _execute_jobs(jobs,cfg,opts,overrides,assets,metadata,previews,reports,log,
+                                 progress_cb,cancel_event,analyze_only,dry_run,isolated and save_reports)
+        finally:
+            if save_reports:log.write(log_path)
+
+
+def _execute_jobs(jobs,cfg,opts,overrides,assets,metadata,previews,reports,log,progress_cb,cancel_event,analyze_only,dry_run,item_manifests):
     fingerprints=[];planning_errors={};variants={};texture_cache={};codec_contexts={}
     def effective_options(job):
         effective=_RuntimeOptions(opts);effective.update(overrides.get(job['id'],{}))
+        if not job.get('include_textures',True):
+            return effective
         external=effective.get('texconv_path') is not False
         if external not in codec_contexts:codec_contexts[external]=_codec_context(external)
         effective.update(codec_contexts[external])
         if getattr(cfg,'metal_mode','off')=='off':effective['mode']='off'
         effective.pop('job_overrides',None);effective.pop('metal_options',None)
         return effective
+    finished = False
     try:
         _check(cancel_event)
         for index,job in enumerate(jobs):
@@ -555,33 +682,37 @@ def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_onl
             except Exception as exc:
                 fingerprints.append(None);planning_errors[index]=str(exc);continue
             fingerprints.append(fingerprint)
-            for role,src in job['texture_paths'].items():
-                if role in ('d','s','r','l'):
+            for role,src in _export_maps(job, getattr(cfg,'direction','76-to-4'), job.get('material_kind')).items():
+                if job.get('include_textures',True) and role in ('d','s','r','l'):
                     key=str(src).lower();prior=variants.get(key)
                     if prior is None:variants[key]=fingerprint
                     elif prior!=fingerprint:variants[key]=False
             if progress_cb and index%250==0:progress_cb(0,len(jobs),'Preparing: '+job['name'])
-        snapshot={f.name:getattr(cfg,f.name) for f in dataclasses.fields(cfg)}
-        snapshot['direction']=getattr(cfg,'direction','76-to-4')
-        snapshot['codec_selection']={str(key):value['_codec_identity'] for key,value in codec_contexts.items()}
-        with (run/'config_snapshot.json').open('w',encoding='utf8') as stream:json.dump(snapshot,stream,indent=2,default=_json)
+        if reports is not None:
+            snapshot={f.name:getattr(cfg,f.name) for f in dataclasses.fields(cfg)}
+            snapshot['direction']=getattr(cfg,'direction','76-to-4')
+            snapshot['codec_selection']={str(key):value['_codec_identity'] for key,value in codec_contexts.items()}
+            with (metadata/'config_snapshot.json').open('x',encoding='utf8') as stream:json.dump(snapshot,stream,indent=2,default=_json)
         for index,original in enumerate(jobs):
             _check(cancel_event)
             job=dict(original);opt=effective_options(job);opt['_texture_cache']=texture_cache;opt['_planned_fingerprint']=fingerprints[index];job['_variant_keys']={}
-            for role,src in job['texture_paths'].items():
+            for role,src in _export_maps(job, getattr(cfg,'direction','76-to-4'), job.get('material_kind')).items():
                 if variants.get(str(src).lower()) is False:job['_variant_keys']['s' if role in ('l','r') else role]=fingerprints[index]
             if progress_cb:opt['_stage_cb']=lambda stage,i=index,name=job['name']:progress_cb(i,len(jobs),stage+' · '+name)
             try:
                 if index in planning_errors:raise ValueError(planning_errors[index])
-                if analyze_only:
-                    result=preview_job(job,opt,cancel_event=cancel_event);dest=run/'previews'/job['id'];dest.mkdir(parents=True)
+                if analyze_only and not job.get('include_textures',True):
+                    result=run_job(job,assets,direction=getattr(cfg,'direction','76-to-4'),dry_run=True,options=opt,cancel_event=cancel_event,generate_report=item_manifests)
+                    result['status']='analyzed'
+                elif analyze_only:
+                    result=preview_job(job,opt,cancel_event=cancel_event);dest=previews/job['id'];dest.mkdir()
                     for name,arr in result['views'].items():
                         _check(cancel_event)
                         a=np.asarray(arr);a=np.rint(np.clip(a,0,1)*255).astype(np.uint8) if a.dtype.kind=='f' else a
                         target=dest/(name+'.png')
                         with pinned_path(target),target.open('xb') as stream:Image.fromarray(a).save(stream,format='PNG')
                     result={'id':job['id'],'name':job['name'],'status':'analyzed','diagnostics':result['diagnostics'],'metadata':result['metadata']}
-                else:result=run_job(job,run/'converted',direction=getattr(cfg,'direction','76-to-4'),dry_run=dry_run,options=opt,cancel_event=cancel_event)
+                else:result=run_job(job,assets,direction=getattr(cfg,'direction','76-to-4'),dry_run=dry_run,options=opt,cancel_event=cancel_event,generate_report=item_manifests)
                 log.add('OK',job['name'],'Plan validated' if dry_run else 'Analysis exported' if analyze_only else 'Validated group committed')
                 for warning in result.get('warnings',[]):log.add('WARNING',job['name'],warning)
                 for code in result.get('metal',{}).get('diagnostic_codes',[]):
@@ -589,16 +720,22 @@ def run_jobs(jobs,cfg,progress_cb=None,log_cb=None,cancel_event=None,analyze_onl
             except Cancelled:raise
             except dds.EncoderCleanupError as exc:
                 result=dict(id=job['id'],name=job['name'],status='failed',error=str(exc))
-                log.add('ERROR',job['name'],str(exc));reports.add(result)
+                log.add('ERROR',job['name'],str(exc))
+                if reports is not None:reports.add(result)
                 raise
             except Exception as exc:
                 result=dict(id=job['id'],name=job['name'],status='failed',error=str(exc));log.add('ERROR',job['name'],str(exc))
-            reports.add(result)
+            if reports is not None:reports.add(result)
             if progress_cb:progress_cb(index+1,len(jobs),job['name'])
+        finished = True
     except Cancelled:pass
     finally:
         cancelled=bool(cancel_event is not None and cancel_event.is_set())
-        reports.finish(dict(build=BUILD,total=len(jobs),errors=log.errors,cancelled=cancelled,game_verified=False))
-        (reportdir/'summary.txt').write_text(log.summary()+'\nGame appearance is unverified.\n',encoding='utf8');log.write(str(reportdir/'conversion_log.txt'))
-        (run/('PARTIAL' if cancelled or log.errors or reports.count!=len(jobs) else 'COMPLETE')).write_text('analysis-only' if analyze_only else 'dry-run' if dry_run else 'binary-validated; game-unverified',encoding='utf8')
+        if reports is not None:
+            reports.finish(dict(build=BUILD,total=len(jobs),errors=log.errors,cancelled=cancelled,game_verified=False))
+            with (Path(log.report_dir)/'summary.txt').open('x',encoding='utf8') as summary:
+                summary.write(log.summary()+'\nGame appearance is unverified.\n')
+            marker = 'COMPLETE' if finished and not cancelled and not log.errors and reports.count==len(jobs) else 'PARTIAL'
+            with (metadata/marker).open('x',encoding='utf8') as state:
+                state.write('analysis-only' if analyze_only else 'dry-run' if dry_run else 'binary-validated; game-unverified')
     return log

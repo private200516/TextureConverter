@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from options_policy import processing_options, job_options
 
 APP_NAME = "FO76_to_FO4"
 APP_TITLE = "FO76 → FO4 Texture Converter"
-APP_AUTHOR = "private0516"
+APP_AUTHOR = "Private0516"
+APP_VERSION = "1.0"
 
 # 自定义图标：把 icon.ico / icon.png / icon.jpg 放到 EXE 同目录即可替换，
 # 程序运行中替换文件会实时热更新（约 2 秒内生效）。
@@ -163,6 +166,8 @@ class Config:
 
     # 界面语言（zh / en）
     lang: str = "zh"
+    materials_input: str = ""
+    output_layout: str = "game"
 
     def apply_mode(self) -> None:
         preset = MODES.get(self.mode, MODES["balanced"])
@@ -183,6 +188,13 @@ class Config:
         if not isinstance(data, dict): raise ValueError('Configuration must be an object')
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         values = {k: v for k, v in data.items() if k in known}
+        for key in ('input_dir', 'output_dir', 'materials_input'):
+            if key in values and (not isinstance(values[key], str) or '\0' in values[key]):
+                raise ValueError(f'Invalid directory preference: {key}')
+        if values.get('output_layout', 'game') not in ('game', 'isolated'):
+            raise ValueError('Unknown output layout')
+        if 'generate_report' in values and not isinstance(values['generate_report'], bool):
+            raise ValueError('Report preference must be true or false')
         values['metal_options'] = processing_options(values.get('metal_options'))
         values['job_overrides'] = job_options(values.get('job_overrides'))
         return cls(**values)
@@ -217,8 +229,23 @@ def load_config() -> Config:
 
 
 def save_config(cfg: Config) -> None:
+    from security_io import MAX_JSON_BYTES, assert_no_reparse, pinned_path
+    temp = None
     try:
-        with open(config_path(), "w", encoding="utf-8") as f:
-            f.write(cfg.to_json())
-    except OSError:
-        pass  # 只读目录等情况不致命
+        target = assert_no_reparse(config_path())
+        payload = cfg.to_json().encode('utf-8')
+        if len(payload) > MAX_JSON_BYTES:
+            return
+        with pinned_path(target.parent):
+            try:
+                with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.settings-', suffix='.tmp', delete=False) as stream:
+                    temp = Path(stream.name)
+                    stream.write(payload)
+                # Replacing the name also protects the referents of existing hard links.
+                os.replace(temp, target)
+                temp = None
+            finally:
+                if temp is not None:
+                    temp.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        pass  # Keep the last complete preferences if saving fails.

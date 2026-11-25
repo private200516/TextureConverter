@@ -3,7 +3,7 @@
 These checks protect ordinary asset I/O; they are not an OS sandbox.
 """
 from __future__ import annotations
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import json
 import math
 import os
@@ -22,7 +22,7 @@ def safe_relative(value):
     parts = value.split('/')
     if (not value or len(value) > 32760 or any(not part or part in ('.', '..') or
             part[-1:] in (' ', '.') or any(ord(c) < 32 or c in ':<>"|?*' for c in part) or
-            part.split('.', 1)[0].upper() in _DEVICES for part in parts)):
+            part.split('.', 1)[0].rstrip(' ').upper() in _DEVICES for part in parts)):
         raise ValueError('Unsafe relative asset path: ' + value[:160])
     return PurePosixPath(*parts).as_posix()
 
@@ -30,7 +30,7 @@ def safe_relative(value):
 def absolute_path(value):
     text = os.fspath(value)
     # Reject Win32 device, extended namespace, UNC and ADS before Path normalizes.
-    if '\0' in text or text.startswith(('\\\\', '//')):
+    if '\0' in text or text.replace('\\', '/').startswith('//'):
         raise ValueError('Device/UNC paths are not supported')
     path = Path(os.path.abspath(text))
     if path.parts[1:]: safe_relative('/'.join(path.parts[1:]))
@@ -49,66 +49,159 @@ def assert_no_reparse(value):
     return path
 
 
-@contextmanager
-def pinned_path(value):
-    """Reject links and hold existing Windows components against replacement.
+if os.name == 'nt':
+    import ctypes
+    from ctypes import wintypes
 
-    FILE_SHARE_DELETE is deliberately absent. Check the opened handle itself,
-    so a rename/reparse race before CreateFile cannot turn into a followed link.
-    Non-Windows callers still get lstat checks and exclusive publication.
-    """
-    path = assert_no_reparse(value)
-    handles = []
+    class _FileInfo(ctypes.Structure):
+        _fields_ = [('attributes', wintypes.DWORD), ('creation', wintypes.FILETIME),
+                    ('access', wintypes.FILETIME), ('write', wintypes.FILETIME),
+                    ('volume', wintypes.DWORD), ('size_high', wintypes.DWORD),
+                    ('size_low', wintypes.DWORD), ('links', wintypes.DWORD),
+                    ('index_high', wintypes.DWORD), ('index_low', wintypes.DWORD)]
+
+    _kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    _create = _kernel.CreateFileW
+    _create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    _create.restype = wintypes.HANDLE
+    _inspect = _kernel.GetFileInformationByHandle
+    _inspect.argtypes = [wintypes.HANDLE, ctypes.POINTER(_FileInfo)]
+    _close = _kernel.CloseHandle
+    _close.argtypes = [wintypes.HANDLE]
+    _INVALID_HANDLE = wintypes.HANDLE(-1).value
+    _mutex = _kernel.CreateMutexW
+    _mutex.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    _mutex.restype = wintypes.HANDLE
+    _wait = _kernel.WaitForSingleObject
+    _wait.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _release = _kernel.ReleaseMutex
+    _release.argtypes = [wintypes.HANDLE]
+
+
+@contextmanager
+def publication_lock(directory, check_cancel):
+    # Serialize the check/publish/rollback interval across converter instances.
+    # A process exit releases the OS lock without leaving a file in the game tree.
+    import time
+    deadline = time.monotonic() + 60
+    def check_wait():
+        check_cancel()
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Another export is publishing to this directory. Retry when it finishes.')
     if os.name == 'nt':
-        import ctypes
-        from ctypes import wintypes
-        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-        create = kernel.CreateFileW
-        create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                           wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        create.restype = wintypes.HANDLE
-        close = kernel.CloseHandle
-        close.argtypes = [wintypes.HANDLE]
-        class FileInfo(ctypes.Structure):
-            _fields_ = [('attributes', wintypes.DWORD), ('creation', wintypes.FILETIME),
-                       ('access', wintypes.FILETIME), ('write', wintypes.FILETIME),
-                       ('volume', wintypes.DWORD), ('size_high', wintypes.DWORD),
-                       ('size_low', wintypes.DWORD), ('links', wintypes.DWORD),
-                       ('index_high', wintypes.DWORD), ('index_low', wintypes.DWORD)]
-        inspect = kernel.GetFileInformationByHandle
-        inspect.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInfo)]
+        import hashlib
+        key = hashlib.sha256(os.fsencode(os.path.normcase(os.path.realpath(directory)))).hexdigest()
+        handle = _mutex(None, False, 'Local\\FO76TexturePublish-' + key)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
         try:
-            for component in reversed((path, *path.parents)):
-                # Directory share-write permits ordinary child rename/create;
-                # no share-delete still pins the directory's own name. Files
-                # additionally exclude writers for coherent header/payload reads.
-                directory=component.is_dir()
-                handle = create(str(component), 0x80000000, 3 if directory else 1, None, 3, 0x02200000, None)
-                if handle == wintypes.HANDLE(-1).value:
-                    error = ctypes.get_last_error()
-                    if error in (2, 3):
-                        break
-                    raise ctypes.WinError(error)
-                handles.append(handle)
-                info = FileInfo()
-                if not inspect(handle, ctypes.byref(info)):
+            while True:
+                check_wait()
+                result = _wait(handle, 200)
+                if result in (0, 0x80):  # acquired, including an abandoned owner
+                    break
+                if result != 0x102:
                     raise ctypes.WinError(ctypes.get_last_error())
-                if info.attributes & 0x400:
-                    raise ValueError('Reparse/symlink asset paths are not supported')
-                if bool(info.attributes & 0x10)!=directory:
-                    raise ValueError('Asset path type changed while opening')
-            yield path
+            try:
+                yield
+            finally:
+                _release(handle)
         finally:
-            for handle in reversed(handles):
-                close(handle)
+            _close(handle)
     else:
+        import fcntl
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            while True:
+                check_wait()
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    time.sleep(.1)
+            yield
+        finally:
+            os.close(descriptor)
+
+
+@contextmanager
+def pinned_path(value, *, must_exist=False, expect_directory=False):
+    """Pin each Windows component before inspecting the next component."""
+    if os.name != 'nt':
+        path = assert_no_reparse(value)
+        if must_exist or path.exists():
+            mode=path.stat().st_mode
+            if expect_directory and not stat.S_ISDIR(mode):
+                raise NotADirectoryError(path)
         yield path
         assert_no_reparse(path)
+        return
+
+    path = absolute_path(value)
+    handles = []
+    try:
+        for component in reversed((path, *path.parents)):
+            directory = True
+            if component == path and not expect_directory:
+                try:
+                    mode = component.lstat().st_mode
+                except FileNotFoundError:
+                    if must_exist: raise
+                    directory = False
+                else:
+                    directory = stat.S_ISDIR(mode)
+            # OPEN_REPARSE_POINT inspects the entry itself. Never share-delete;
+            # permit share-write only for directories, so source files stay stable.
+            handle = _create(str(component), 0x80000000, 3 if directory else 1,
+                             None, 3, 0x02200000, None)
+            if handle == _INVALID_HANDLE:
+                error = ctypes.get_last_error()
+                if not must_exist and error in (2, 3): break
+                raise ctypes.WinError(error)
+            handles.append(handle)
+            info = _FileInfo()
+            if not _inspect(handle, ctypes.byref(info)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if info.attributes & 0x400:
+                raise ValueError('Reparse/symlink asset paths are not supported')
+            if bool(info.attributes & 0x10) != directory:
+                raise ValueError('Asset path type changed while opening')
+        yield path
+    finally:
+        for handle in reversed(handles):
+            _close(handle)
+
+
+@contextmanager
+def export_directory(value, *, fresh=False):
+    # Pin the nearest existing directory and create each remaining component
+    # under a checked parent. Cooperating processes can race to create it.
+    path = absolute_path(value)
+    missing = []
+    current = path.parent if fresh else path
+    with ExitStack() as pins:
+        while True:
+            try:
+                pins.enter_context(pinned_path(current, must_exist=True, expect_directory=True))
+                break
+            except FileNotFoundError:
+                if current == current.parent:
+                    raise
+                missing.append(current)
+                current = current.parent
+        for component in reversed(missing):
+            component.mkdir(exist_ok=True)
+            pins.enter_context(pinned_path(component, must_exist=True, expect_directory=True))
+        if fresh:
+            path.mkdir()
+            pins.enter_context(pinned_path(path, must_exist=True, expect_directory=True))
+        yield path
 
 
 @contextmanager
 def open_read(value):
-    with pinned_path(value) as path, path.open('rb') as stream:
+    with pinned_path(value, must_exist=True) as path, path.open('rb') as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError('A regular local file is required')
         yield stream
@@ -135,7 +228,7 @@ def png_header(stream, shape=None):
     return width,height
 
 
-def json_bounded(text, limit=MAX_JSON_BYTES):
+def json_bounded(text, limit=MAX_JSON_BYTES, *, max_depth=64):
     if not isinstance(text, (str, bytes)) or len(text) > limit:
         raise ValueError('JSON exceeds input byte limit')
     if isinstance(text, str) and len(text.encode('utf-8')) > limit:
@@ -150,7 +243,7 @@ def json_bounded(text, limit=MAX_JSON_BYTES):
         elif char == '"': quoted = True
         elif char in '[{':
             depth += 1
-            if depth > 64: raise ValueError('JSON nesting exceeds 64 levels')
+            if depth > max_depth: raise ValueError(f'JSON nesting exceeds {max_depth} levels')
         elif char in ']}': depth -= 1
     def pairs(items):
         result = {}

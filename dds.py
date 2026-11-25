@@ -191,7 +191,7 @@ def _stop_encoder(proc):
 
 def _run_texconv(command, cancel_event=None, timeout=600):
     _check_cancel(cancel_event)
-    with pinned_path(command[0]) as executable:
+    with pinned_path(command[0], must_exist=True) as executable:
         return _run_texconv_pinned([str(executable),*command[1:]],cancel_event,timeout)
 
 

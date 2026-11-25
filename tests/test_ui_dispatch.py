@@ -58,7 +58,7 @@ class WorkflowTests(unittest.TestCase):
         self.w._closing=True;self.w.close();self.w.deleteLater();self.app.processEvents()
         self.env.stop();self.tmp.cleanup()
     def test_compact_home_and_optional_inspection(self):
-        self.assertEqual(self.w.tabs.count(),4);self.assertEqual(self.w.tabs.currentIndex(),0)
+        self.assertEqual(self.w.tabs.count(),5);self.assertEqual(self.w.tabs.currentIndex(),0)
         self.w._validate=lambda: self.w.cfg
         calls=[];self.w._run_convert=lambda cfg:calls.append(cfg)
         self.w.on_start();self.assertEqual(calls,[self.w.cfg])
@@ -76,7 +76,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.dialog.views,{});self.assertIsNone(self.dialog.preview_key)
     def test_large_log_opens_outside_event_loop(self):
         path=Path(self.tmp.name)/'conversion_log.txt';path.write_text('entry\n')
-        self.w._last_output=self.tmp.name
+        self.w._last_report_dir=self.tmp.name
         with patch.object(os,'startfile') as launch:self.w.on_view_log()
         launch.assert_called_once_with(str(path))
 

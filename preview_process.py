@@ -14,11 +14,17 @@ import sys
 import tempfile
 import time
 import numpy as np
-from security_io import json_bounded, read_bounded, MAX_JSON_BYTES
+from security_io import json_bounded, open_read, read_bounded, MAX_JSON_BYTES
 
 MAX_ARRAY_BYTES = 256 * 1024 * 1024
 MAX_PROCESS_BYTES = 2 * 1024 * 1024 * 1024
 PREVIEW_TIMEOUT = 120
+
+# Accept only scalar numeric descriptors produced by ndarray.dtype.str.
+_WIRE_DTYPES = {'|b1', '|i1', '|u1'} | {
+    order + kind + str(size)
+    for order in '<>' for kind in 'iuf' for size in (2, 4, 8)
+}
 
 
 class PreviewProcessError(ValueError): pass
@@ -54,16 +60,19 @@ def write_wire(directory, name, value):
         tree=encode(value)
     raw=json.dumps(tree,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode('utf8')
     if len(raw)>MAX_JSON_BYTES:raise PreviewProcessError('Preview JSON exceeds 8 MiB budget')
-    (Path(directory)/(name+'.json')).write_bytes(raw)
+    with (Path(directory)/(name+'.json')).open('xb') as metadata:
+        metadata.write(raw)
 
 
 def read_wire(directory, name):
     root=Path(directory)
     tree=json_bounded(read_bounded(root/(name+'.json'),MAX_JSON_BYTES,'Preview JSON'))
     binary=root/(name+'.bin')
-    if binary.stat().st_size>MAX_ARRAY_BYTES:raise PreviewProcessError('Preview IPC exceeds 256 MiB array budget')
     allocated=0;arrays=[]
-    with binary.open('rb') as data:
+    with open_read(binary) as data:
+        binary_size = os.fstat(data.fileno()).st_size
+        if binary_size > MAX_ARRAY_BYTES:
+            raise PreviewProcessError('Preview IPC exceeds 256 MiB array budget')
         def decode(value,depth=0):
             nonlocal allocated
             if depth>48:raise PreviewProcessError('Preview result nesting limit')
@@ -76,16 +85,22 @@ def read_wire(directory, name):
             if '$array' in value:
                 if set(value)!={'$array','shape','dtype','offset','nbytes'}:raise PreviewProcessError('Invalid preview array descriptor')
                 if type(value['$array']) is not int or value['$array']!=len(arrays):raise PreviewProcessError('Invalid preview array order')
-                dtype=np.dtype(value['dtype']);shape=value['shape'];offset=value['offset'];size=value['nbytes']
-                if dtype.kind not in 'buif' or dtype.itemsize>8 or len(shape)>4 or any(type(x) is not int or x<0 for x in shape):
+                descriptor, shape = value['dtype'], value['shape']
+                if (not isinstance(descriptor, str) or descriptor not in _WIRE_DTYPES
+                        or not isinstance(shape, list) or len(shape) > 4
+                        or any(type(dim) is not int or not 0 <= dim <= MAX_ARRAY_BYTES for dim in shape)):
                     raise PreviewProcessError('Invalid preview numeric type/shape')
-                expected=math.prod(shape)*dtype.itemsize
-                if (type(offset) is not int or type(size) is not int or offset<0 or size!=expected or
-                        offset+size>binary.stat().st_size or allocated+size>MAX_ARRAY_BYTES):
-                    raise PreviewProcessError('Preview array exceeds IPC budget')
-                allocated+=size;data.seek(offset);raw=data.read(size)
-                if len(raw)!=size:raise PreviewProcessError('Truncated preview array')
-                array=np.frombuffer(raw,dtype=dtype).reshape(shape).copy();arrays.append(array);return array
+                dtype = np.dtype(descriptor)
+                size, offset = value['nbytes'], value['offset']
+                if (type(offset) is not int or offset != allocated or type(size) is not int
+                        or size != math.prod(shape) * dtype.itemsize or offset + size > binary_size):
+                    raise PreviewProcessError('Preview array exceeds IPC budget or has a non-sequential offset')
+                array = np.empty(shape, dtype=dtype)
+                if size and data.readinto(array.reshape(-1).view(np.uint8)) != size:
+                    raise PreviewProcessError('Truncated preview array')
+                allocated += size
+                arrays.append(array)
+                return array
             if '$class' in value:
                 from nif_preview_data import PreviewScene,PreviewMesh,PreviewMaterial
                 kinds={c.__name__:c for c in (PreviewScene,PreviewMesh,PreviewMaterial)}
@@ -95,7 +110,10 @@ def read_wire(directory, name):
                 return cls(**{key:decode(item,depth+1) for key,item in value['fields'].items()})
             if any(key.startswith('$') for key in value):raise PreviewProcessError('Invalid preview object')
             return {key:decode(item,depth+1) for key,item in value.items()}
-        return decode(tree)
+        result = decode(tree)
+        if allocated != binary_size:
+            raise PreviewProcessError('Unexpected trailing preview array data')
+        return result
 
 
 class _WindowsJob:
@@ -140,23 +158,34 @@ def _stop(process):
 
 
 def _validate_scene(scene):
-    from nif_preview_data import PreviewScene,PreviewMesh,MAX_TRIANGLES,MAX_TEXTURE_PIXELS
+    from nif_preview_data import PreviewScene,PreviewMesh,MAX_TRIANGLES,MAX_VERTICES,MAX_TEXTURE_PIXELS
     if not isinstance(scene,PreviewScene) or not isinstance(scene.meshes,list) or len(scene.meshes)>100000:
         raise PreviewProcessError('Invalid preview scene')
     if not isinstance(scene.center,np.ndarray) or scene.center.shape!=(3,) or not np.isfinite(scene.center).all() or not 0<scene.radius<=2e9:
         raise PreviewProcessError('Invalid preview bounds')
-    rows=pixels=0;seen=set()
+    rows=triangles=pixels=0;seen=set()
     for mesh in scene.meshes:
-        if not isinstance(mesh,PreviewMesh) or mesh.vertices.dtype!=np.float32 or mesh.vertices.ndim!=2 or mesh.vertices.shape[1]!=12 or mesh.vertices.shape[0]%3:
+        if (not isinstance(mesh,PreviewMesh) or not isinstance(mesh.vertices,np.ndarray)
+                or mesh.vertices.dtype!=np.float32 or mesh.vertices.ndim!=2 or mesh.vertices.shape[1]!=12
+                or not 0<len(mesh.vertices)<=65535):
             raise PreviewProcessError('Invalid preview vertices')
-        rows+=len(mesh.vertices)
-        if rows>MAX_TRIANGLES*3 or not np.isfinite(mesh.vertices).all():raise PreviewProcessError('Preview geometry budget exceeded')
+        indices = mesh.indices
+        if (not isinstance(indices,np.ndarray) or indices.dtype!=np.uint16 or indices.ndim!=2
+                or indices.shape[1]!=3 or len(indices)==0):
+            raise PreviewProcessError('Invalid preview triangle indices')
+        rows+=len(mesh.vertices);triangles+=len(indices)
+        if rows>MAX_VERTICES or triangles>MAX_TRIANGLES or not np.isfinite(mesh.vertices).all():
+            raise PreviewProcessError('Preview geometry budget exceeded')
+        if int(indices.max())>=len(mesh.vertices):
+            raise PreviewProcessError('Preview triangle references missing vertex')
         for entry in mesh.material.textures.values():
             if not isinstance(entry,list) or len(entry)!=2:raise PreviewProcessError('Invalid preview texture')
             image=entry[1]
             if image.dtype!=np.uint8 or image.ndim!=3 or image.shape[2]!=4:raise PreviewProcessError('Invalid preview texture pixels')
             if id(image) not in seen:pixels+=image.shape[0]*image.shape[1];seen.add(id(image))
             if pixels>MAX_TEXTURE_PIXELS:raise PreviewProcessError('Preview texture budget exceeded')
+    if type(scene.triangles) is not int or scene.triangles!=triangles:
+        raise PreviewProcessError('Preview triangle count mismatch')
     return scene
 
 

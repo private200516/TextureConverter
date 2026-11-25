@@ -3,7 +3,7 @@ import os,sys,tempfile,types,unittest
 from pathlib import Path
 from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
-from PySide6.QtCore import Signal,QTimer
+from PySide6.QtCore import Signal,QTimer,QEvent,QObject,Qt
 from PySide6.QtWidgets import QApplication,QWidget
 from PySide6.QtTest import QTest
 import main
@@ -45,9 +45,13 @@ class PreviewIntegrationTests(unittest.TestCase):
         preview.current_roots=('user-selected','user-selected-source')
         self.w.tabs.setCurrentIndex(0);self.w.open_model_preview()
         self.assertEqual(len(preview.roots),1);self.assertEqual(preview.current_roots,('user-selected','user-selected-source'))
-        run=self.root/'run_001';(run/'converted').mkdir(parents=True)
-        self.w._last_output=str(run);self.w._ensure_preview()
-        self.assertEqual(preview.roots[-1],(str(run/'converted'),str(self.root/'source')))
+        shared = self.root / 'shared'
+        (shared / 'converted').mkdir(parents=True)
+        (shared / 'materials').mkdir()
+        self.w._last_output = str(self.root / 'output')
+        self.w.out_edit.setText(str(shared))
+        self.w._ensure_preview()
+        self.assertEqual(preview.roots[-1],(str(shared),str(self.root/'source')))
     def test_close_waits_for_loader_then_releases_preview(self):
         self.w.open_model_preview();p=self.w._preview;p.busy=True;p.busy_changed.emit(True)
         self.w.close();self.assertTrue(self.w.isVisible());self.assertTrue(self.w._close_pending)
@@ -69,5 +73,43 @@ class PreviewIntegrationTests(unittest.TestCase):
         self.w.cfg.mode='high';self.w.cfg.apply_mode();old=self.w.cfg.diffuse_fmt,self.w.cfg.normal_fmt,self.w.cfg.specular_fmt,self.w.cfg.glow_fmt
         self.w._load_into_ui();new=self.w._collect()
         self.assertEqual(new.mode,'balanced');self.assertEqual(old,(new.diffuse_fmt,new.normal_fmt,new.specular_fmt,new.glow_fmt))
+
+class PreviewSurfaceTests(unittest.TestCase):
+    def test_first_preview_selection_preserves_visible_top_level_window(self):
+        app = QApplication.instance() or QApplication([])
+        class WindowEvents(QObject):
+            def __init__(self):
+                super().__init__()
+                self.seen = []
+            def eventFilter(self, obj, event):
+                if event.type() in (QEvent.Close, QEvent.Hide, QEvent.Show, QEvent.WinIdChange):
+                    self.seen.append(event.type())
+                return False
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {
+            'TEXTURE_CONVERTER_CONFIG': str(Path(td) / 'settings.json')
+        }):
+            w = main.MainWindow()
+            w.show()
+            QTest.qWait(20)
+            win_id, surface = int(w.winId()), w.windowHandle().surfaceType()
+            events = WindowEvents()
+            w.installEventFilter(events)
+            try:
+                bar = w.tabs.tabBar()
+                for index in (w.preview_tab_index, 0, w.preview_tab_index):
+                    QTest.mouseClick(bar, Qt.LeftButton, pos=bar.tabRect(index).center())
+                    QTest.qWait(30)
+                    self.assertEqual(w.tabs.currentIndex(), index)
+                self.assertEqual(int(w.winId()), win_id)
+                self.assertEqual(w.windowHandle().surfaceType(), surface)
+                self.assertEqual(events.seen, [])
+                self.assertTrue(w.isVisible() and w._preview.isVisible())
+                self.assertIsNone(w.navigation_motion.overlay)
+            finally:
+                w.removeEventFilter(events)
+                w._closing = True
+                w.close()
+                w.deleteLater()
+                app.processEvents()
 
 if __name__=='__main__':unittest.main()

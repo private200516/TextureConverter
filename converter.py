@@ -101,7 +101,7 @@ class Converter:
         rgba = dds.decode_dds_pixels(src, info, cancel_event=self.cancel_event)
         src_fmt = info.fmt
 
-        ctx = {}
+        ctx = {'diffuse_format': src_fmt}
         if transform is not None:
             rgba, tnotes = transform(rgba, ctx)
             dds._check_cancel(self.cancel_event)
@@ -135,20 +135,27 @@ class Converter:
 
         # 预载 _l / _r（可能多处用到）
         l_img = r_img = None
+        reflectance_format = ""
         if any(k in maps for k in ("l",)) and (cfg.generate_s or cfg.ao_mode or cfg.glow_from_l_alpha):
             l_img = dds.decode_dds_pixels(maps["l"], cancel_event=self.cancel_event) if "l" in maps else None
         if "r" in maps and (cfg.generate_s or cfg.metal_compensation):
-            r_img = dds.decode_dds_pixels(maps["r"], cancel_event=self.cancel_event)
+            r_info = dds.parse_dds_header(maps["r"])
+            reflectance_format = r_info.fmt
+            r_img = dds.decode_dds_pixels(maps["r"], r_info, cancel_event=self.cancel_event)
 
         # --- Diffuse ---
         if "d" in maps:
             def d_transform(rgba, _ctx):
                 notes = []
+                original = None
                 if cfg.ao_mode and l_img is not None:
-                    rgba = material.apply_ao_to_diffuse(rgba, l_img, cfg.ao_strength)
+                    original = rgba
+                    rgba = material.apply_ao_to_diffuse(rgba, l_img, cfg.ao_strength, cancel_event=self.cancel_event)
                     notes.append(f"AO×{cfg.ao_strength:.2f}")
                 if cfg.metal_compensation and r_img is not None:
-                    rgba = material.apply_metal_compensation(rgba, r_img, cfg.metal_strength)
+                    rgba = material.apply_metal_compensation(
+                        rgba, r_img, cfg.metal_strength, reflectance_format=reflectance_format,
+                        diffuse_format=_ctx["diffuse_format"], source_diffuse=original, cancel_event=self.cancel_event)
                     notes.append(f"Metal×{cfg.metal_strength:.2f}")
                 return rgba, notes
 
@@ -199,7 +206,7 @@ class Converter:
         if cfg.generate_s:
             if "l" in maps and "r" in maps:
                 try:
-                    s = material.build_specular(l_img, r_img)
+                    s = material.build_specular(l_img, r_img, cancel_event=self.cancel_event)
                     out = self._out_path(ms.rel_dir, name_of("s"))
                     used, warn = dds.encode_dds(s, cfg.specular_fmt, out,
                                                 mipmaps=cfg.generate_mipmap,
@@ -243,15 +250,16 @@ class Converter:
     # -- 主流程 -------------------------------------------------------------
 
     def run(self) -> ConversionLog:
-        """All modes use isolated runs; off retains the ordinary pixel algorithms."""
+        """Run the selected layout through the shared material/texture pipeline."""
         from texture_api import scan_jobs, run_jobs
         from material_jobs import scan_context_matches
         direction=getattr(self.cfg,"direction","76-to-4")
         include_textures=getattr(self.cfg,"include_textures",True)
-        if self.prepared_jobs is not None and scan_context_matches(self.scan_context,self.cfg.input_dir,direction,include_textures,self.cancel_event):
+        if self.prepared_jobs is not None and scan_context_matches(self.scan_context,self.cfg.input_dir,direction,include_textures,self.cancel_event,inspect_texture_files=include_textures):
             jobs=self.prepared_jobs;self.scan_reused=True
         else:
-            jobs=scan_jobs(self.cfg.input_dir,direction=direction,include_textures=include_textures,cancel_event=self.cancel_event,progress_cb=self._progress_cb)
+            jobs=scan_jobs(self.cfg.input_dir,direction=direction,include_textures=include_textures,cancel_event=self.cancel_event,
+                           progress_cb=self._progress_cb,inspect_texture_files=include_textures)
         self.prepared_jobs=None;self.scan_context=None
         if not self.cfg.convert_bgsm:
             jobs = [dict(job, material_path=None, kind="texture_group")
